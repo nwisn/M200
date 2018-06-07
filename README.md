@@ -1,5 +1,5 @@
 # Advanced Experimental Statistics
-Some RMarkdown tutorials for Biostats/PhySci M200 (advanced experimental statistics), a course for life-science PhD students, taught by Professor Nicholas Wisniewski at UCLA 2012-2016.
+Here are some RMarkdown tutorials for Biostats/PhySci M200 (advanced experimental statistics), a course for life-science PhD students, taught by Professor Nicholas Wisniewski at UCLA 2012-2016.
 
 - [Comparing the means of two groups: t-test](https://nwisn.github.io/M200/t-test_tutorial_2.html)
 - [Statistical power when testing the means of two groups](https://nwisn.github.io/M200/t-test_power_tutorial.html)
