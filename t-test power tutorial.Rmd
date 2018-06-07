@@ -1,0 +1,341 @@
+---
+title: "Computing Power Curves for Two Group Comparisons"
+author: "Nicholas Wisniewski"
+date: "May 10, 2016"
+output:
+  html_document:
+    number_sections: yes
+    theme: spacelab
+    toc: yes
+  pdf_document:
+    toc: yes
+abstract: |
+  Comparing the means of two independent groups is the most common task of statistical inference, and calculating the power of the test being used is essential to interpreting statistical results. In this tutorial we will learn how to compute power curves using Monte Carlo and bootstrapping.
+---
+```{r, echo=FALSE}
+library(knitr)
+knit_hooks$set(purl = function(before, options) {
+  if (before) return()
+  input  = current_input()  # filename of input document
+  output = paste(tools::file_path_sans_ext(input), 'R', sep = '.')
+  if (knitr:::isFALSE(knitr:::.knitEnv$tangle.start)) {
+    assign('tangle.start', TRUE, knitr:::.knitEnv)
+    unlink(output)
+  }
+  cat(options$code, file = output, sep = '\n', append = TRUE)
+})
+```
+
+# Introduction
+
+Comparing the means of two independent groups is the most common task of statistical inference, and calculating the power of the test being used is essential to interpreting statistical results. The power of a test is defined as the probability that it will correctly reject the null hypothesis when the null is false. In other words, it's the probability that your test will detect a real effect of a certain size. In this tutorial we will learn how to compute power curves using Monte Carlo and bootstrapping, as well as a built-in R function.
+
+# Theoretical Power Curves
+
+First let's define the lattice of effect sizes and sample sizes we want to evaluate at. The effect sizes here are Cohen's d, so we will identify our population distribution with the standard normal N(0,1) for convenience. This way, Cohen's d simply equals the difference in the means.
+
+```{r}
+effectsizes <- seq(0,2,.25)
+samplesizes <- c(4,6,8,10,20,30,40)
+```
+
+Now let's compute the power at each point on the lattice.
+
+```{r, eval=T, echo=T}
+library(pwr)
+power.theory <- array(NA, c(length(effectsizes), length(samplesizes)) )
+for (i in 1:length(effectsizes)){
+    power.out <- pwr.t.test(n = samplesizes/2 , d = effectsizes[i], sig.level = 0.05, type = "two.sample")
+    power.theory[i,] <- power.out$power
+}
+```
+
+And now let's plot the power curve.
+
+```{r}
+# Plot power curve
+matplot(power.theory, type='l', col=1:length(samplesizes), xlab="effect size", ylab="power", axes=F, main="Theoretical Power") 
+legend("bottomright", inset=.05, legend=samplesizes, pch=16, horiz=TRUE, col=1:length(samplesizes))
+axis(side=1,at=1:length(effectsizes),labels=effectsizes)
+axis(2)
+abline(h=.8)
+
+``` 
+
+# Monte Carlo
+
+We can also use Monte Carlo to compute the power. We will use for-loops to go over each point on the lattice, and generate Monte Carlo samples of the appropriate sample size and effect size. We then perform the test on these Monte Carlo samples, and see whether it rejects the null hypothesis. We keep track of all the test results, and take the fraction of rejected events at each lattice point to be the power.
+
+First, let's define the number of Monte Carlo simulations we want at each point.
+
+```{r}
+nboot=1000
+```
+
+Now, let's simulate at each point and conduct the test
+
+```{r}
+test <- array(NA, c(length(effectsizes), length(samplesizes), nboot))
+for (i in 1:length(effectsizes)){
+    for (j in 1:length(samplesizes)){
+        for (k in 1:nboot){
+            x <- rnorm(samplesizes[j]/2, 0 + effectsizes[i], 1)
+            y <- rnorm(samplesizes[j]/2, 0, 1)
+            test.out <- t.test(x,y)  # bootstrap test statistic
+            test[i,j,k] <- test.out$p.value < 0.05
+        }
+    }
+}
+```
+
+Next, let's look at all the test results, and define the power as the fraction of correctly rejected null hypotheses.
+
+```{r}
+power.mc <- array(NA, c(length(effectsizes), length(samplesizes)) )
+for (i in 1:length(effectsizes)){
+    for (j in 1:length(samplesizes)){
+        power.mc[i,j] <- sum(test[i,j,])/nboot
+    }
+}
+```
+
+Finally, let's plot the power curve.
+
+```{r}
+matplot(power.mc, type='l', col=1:length(samplesizes), xlab="effect size", ylab="power", axes=F, main="Monte Carlo Power") 
+legend("bottomright", inset=.05, legend=samplesizes, pch=16, horiz=TRUE, col=1:length(samplesizes))
+axis(side=1,at=1:length(effectsizes),labels=effectsizes)
+axis(2)
+abline(h=.8)
+```
+
+# Bootstrap (one-box)
+
+In order to illustrate the bootstrap method for estimating power, we need to assume we have some preliminary data to work from. In the previous constructions (theoretical and Monte Carlo) we sampled repeatedly from the population (so to speak). Here, we must see how to resample from our data to simulate sampling from the population when the population is not known.
+
+```{r}
+bigN <- 20  # total sample size (both groups combined)
+X <- rnorm(bigN/2, 0,1)
+Y <- rnorm(bigN/2, 1,1)
+```
+
+First, we simulate the null distribution. Here we use the one-box approach, so we combine both groups into a single box and resample from that. At the end, we find the critical thresholds for the test using the percentile method.
+
+```{r}
+dstat <- function(x1, x2, center=mean) center(x1) - center(x2) # test statistic
+d0 <- dstat(X,Y)  # actual test statistic
+dnull <- array(NA, c(length(samplesizes), nboot)); 
+for (j in 1:length(samplesizes)){
+    for (k in 1:nboot){
+        x <- sample( c(X,Y), samplesizes[j]/2, replace=T)  # resample new x group
+        y <- sample( c(X,Y), samplesizes[j]/2, replace=T)  # resample new y group
+        dnull[j,k] <- dstat(x, y)  # bootstrap test statistic
+    }
+}
+crit <- apply(dnull,1,quantile, c(0.025,0.975))
+```
+
+Next, we have to simulate the effect sizes and the different sample sizes. To simulate an effect size, we simply add a constant mean shift to one of the groups, while keeping the other constant. We then resample from both groups, and compute the test statistic for each bootstrap resample.
+
+Let's do this at a single point on the lattice just to demonstrate what's happening.
+
+```{r}
+deffect <- array(nboot); 
+for (k in 1:nboot){
+    x <- sample( c(X,Y) + effectsizes[4], bigN/2, replace=T)  # resample new x group
+    y <- sample( c(X,Y), bigN/2, replace=T)  # resample new y group
+    deffect[k] <- dstat(x, y)  # bootstrap test statistic
+}
+```
+
+The idea behind power is to look at the bootstrap distribution of the null, and the bootstrap distribution of the effect, and find the fraction of bootstrap effects that would be rejected by the test. In the following plot, the blue is the null hypothesis, and the red is the effect distribution. The fraction of red events that lie to the right of the upper critical statistic is equal to the power at that particular sample size and effect size.
+
+```{r}
+hist(dnull[5,], breaks="FD", xlim=c(-2,3), col='blue', xlab="Effect Size (difference in means)", main=paste("Power at n=",bigN/2, ", d=",effectsizes[4], sep=""))
+hist(deffect, breaks="FD", add=T, col='red')
+abline(v=crit[,4], lwd=4)
+legend("bottomright", inset=.05, legend=c("Null","Effect"), pch=16, horiz=F, col=c("blue","red"))
+```
+
+Now let's go ahead and do this at all the points on the lattice.
+
+```{r}
+deffect <- array(NA, c(length(effectsizes), length(samplesizes), nboot)); 
+for (i in 1:length(effectsizes)){
+    for (j in 1:length(samplesizes)){
+        for (k in 1:nboot){
+            x <- sample( c(X,Y) + effectsizes[i], samplesizes[j]/2, replace=T)  # resample new x group
+            y <- sample( c(X,Y), samplesizes[j]/2, replace=T)  # resample new y group
+            deffect[i,j,k] <- dstat(x, y)  # bootstrap test statistic
+        }
+    }
+}
+```
+
+For all the lattice points, we count the number of effect-size bootstraps that fall outside the critical region defined by the null hypothesis; this is the power at each point on the lattice.
+
+```{r}
+power <- array(NA, c(length(effectsizes), length(samplesizes))); 
+for (i in 1:length(effectsizes)){
+    for (j in 1:length(samplesizes)){
+        power[i,j] <- (sum(deffect[i,j,] <= crit[1,j]) + sum(deffect[i,j,] >= crit[2,j]) ) / nboot  # two sided
+    }
+}
+```
+
+Finally, we plot the power curve
+
+```{r}
+matplot(power, type='l', col=1:length(samplesizes), xlab="effect size", ylab="power", axes=F, main=paste("Bootrapped from n=",bigN)) 
+legend("bottomright", inset=.05, legend=samplesizes, pch=16, horiz=TRUE, col=1:length(samplesizes))
+axis(side=1,at=1:length(effectsizes),labels=effectsizes)
+axis(2)
+abline(h=.8)
+```
+
+We can verify that if the original samples are very large, then we are effectively sampling from the population, and the estimate asymptotically approaches the true power estimate.
+
+```{r, echo=F}
+bigN <- 2000 # total sample size (both groups combined)
+X <- rnorm(bigN/2, 0,1)
+Y <- rnorm(bigN/2, 1,1)
+
+dstat <- function(x1, x2, center=mean) center(x1) - center(x2) # test statistic
+d0 <- dstat(X,Y)  # actual test statistic
+dnull <- array(NA, c(length(samplesizes), nboot)); 
+for (j in 1:length(samplesizes)){
+    for (k in 1:nboot){
+        x <- sample( c(X,Y), samplesizes[j]/2, replace=T)  # resample new x group
+        y <- sample( c(X,Y), samplesizes[j]/2, replace=T)  # resample new y group
+        dnull[j,k] <- dstat(x, y)  # bootstrap test statistic
+    }
+}
+crit <- apply(dnull,1,quantile, c(0.025,0.975))
+
+deffect <- array(NA, c(length(effectsizes), length(samplesizes), nboot)); 
+for (i in 1:length(effectsizes)){
+    for (j in 1:length(samplesizes)){
+        for (k in 1:nboot){
+            x <- sample( c(X,Y) + effectsizes[i], samplesizes[j]/2, replace=T)  # resample new x group
+            y <- sample( c(X,Y), samplesizes[j]/2, replace=T)  # resample new y group
+            deffect[i,j,k] <- dstat(x, y)  # bootstrap test statistic
+        }
+    }
+}
+
+power <- array(NA, c(length(effectsizes), length(samplesizes))); 
+for (i in 1:length(effectsizes)){
+    for (j in 1:length(samplesizes)){
+        power[i,j] <- (sum(deffect[i,j,] <= crit[1,j]) + sum(deffect[i,j,] >= crit[2,j]) ) / nboot  # two sided
+    }
+}
+
+matplot(power, type='l', col=1:length(samplesizes), xlab="effect size", ylab="power", axes=F, main=paste("Bootrapped from n=",bigN)) 
+legend("bottomright", inset=.05, legend=samplesizes, pch=16, horiz=TRUE, col=1:length(samplesizes))
+axis(side=1,at=1:length(effectsizes),labels=effectsizes)
+axis(2)
+abline(h=.8)
+```
+
+
+And we can see what happens if the sample size is very small. Results will vary from sample to sample a great deal, but most of the time the estimate is not too bad.
+
+```{r, echo=F}
+bigN <- 6 # total sample size (both groups combined)
+X <- rnorm(bigN/2, 0,1)
+Y <- rnorm(bigN/2, 1,1)
+
+dstat <- function(x1, x2, center=mean) center(x1) - center(x2) # test statistic
+d0 <- dstat(X,Y)  # actual test statistic
+dnull <- array(NA, c(length(samplesizes), nboot)); 
+for (j in 1:length(samplesizes)){
+    for (k in 1:nboot){
+        x <- sample( c(X,Y), samplesizes[j]/2, replace=T)  # resample new x group
+        y <- sample( c(X,Y), samplesizes[j]/2, replace=T)  # resample new y group
+        dnull[j,k] <- dstat(x, y)  # bootstrap test statistic
+    }
+}
+crit <- apply(dnull,1,quantile, c(0.025,0.975))
+
+deffect <- array(NA, c(length(effectsizes), length(samplesizes), nboot)); 
+for (i in 1:length(effectsizes)){
+    for (j in 1:length(samplesizes)){
+        for (k in 1:nboot){
+            x <- sample( c(X,Y) + effectsizes[i], samplesizes[j]/2, replace=T)  # resample new x group
+            y <- sample( c(X,Y), samplesizes[j]/2, replace=T)  # resample new y group
+            deffect[i,j,k] <- dstat(x, y)  # bootstrap test statistic
+        }
+    }
+}
+
+power <- array(NA, c(length(effectsizes), length(samplesizes))); 
+for (i in 1:length(effectsizes)){
+    for (j in 1:length(samplesizes)){
+        power[i,j] <- (sum(deffect[i,j,] <= crit[1,j]) + sum(deffect[i,j,] >= crit[2,j]) ) / nboot  # two sided
+    }
+}
+
+matplot(power, type='l', col=1:length(samplesizes), xlab="effect size", ylab="power", axes=F, main=paste("Bootrapped from n=",bigN)) 
+legend("bottomright", inset=.05, legend=samplesizes, pch=16, horiz=TRUE, col=1:length(samplesizes))
+axis(side=1,at=1:length(effectsizes),labels=effectsizes)
+axis(2)
+abline(h=.8)
+```
+
+
+# Bootstrap (two-box)
+
+We can run the two-box bootstrap by keeping the groups separate, and simply removing any existing offset to set their means equal. This will simulate the null hypothesis, and let us find the critical region for the test.
+
+```{r}
+bigN <- 20 # total sample size (both groups combined)
+X <- rnorm(bigN/2, 0,1)
+Y <- rnorm(bigN/2, 1,1)
+
+d0 <- dstat(X,Y)  # actual test statistic
+dnull <- array(NA, c(length(samplesizes), nboot)); 
+for (j in 1:length(samplesizes)){
+    for (k in 1:nboot){
+        x <- sample( X-d0, samplesizes[j]/2, replace=T)  # resample new x group
+        y <- sample( Y, samplesizes[j]/2, replace=T)  # resample new y group
+        dnull[j,k] <- dstat(x, y)  # bootstrap test statistic
+    }
+}
+crit <- apply(dnull,1,quantile, c(0.025,0.975))
+```
+
+Next, we simulate each effect-size for each different sample size on the lattice. We do this by starting from the two-box null, and simply adding the effect-size to one of the groups. We resample from each separately, and compute the test statistic.
+
+```{r}
+deffect <- array(NA, c(length(effectsizes), length(samplesizes), nboot)); 
+for (i in 1:length(effectsizes)){
+    for (j in 1:length(samplesizes)){
+        for (k in 1:nboot){
+            x <- sample( X-d0+effectsizes[i], samplesizes[j]/2, replace=T)  # resample new x group
+            y <- sample( Y, samplesizes[j]/2, replace=T)  # resample new y group
+            deffect[i,j,k] <- dstat(x, y)  # bootstrap test statistic
+        }
+    }
+}
+```
+
+We can then count the fraction of boostraps that lie outside the critical region for each point on the lattice; this is the power at that point.
+
+```{r}
+power <- array(NA, c(length(effectsizes), length(samplesizes))); 
+for (i in 1:length(effectsizes)){
+    for (j in 1:length(samplesizes)){
+        power[i,j] <- (sum(deffect[i,j,] <= crit[1,j]) + sum(deffect[i,j,] >= crit[2,j]) ) / nboot  # two sided
+    }
+}
+```
+
+```{r}
+matplot(power, type='l', col=1:length(samplesizes), xlab="effect size", ylab="power", axes=F,  main=paste("n=",bigN)) 
+legend("bottomright", inset=.05, legend=samplesizes, pch=16, horiz=TRUE, col=1:length(samplesizes))
+axis(side=1,at=1:length(effectsizes),labels=effectsizes)
+axis(2)
+abline(h=.8)
+```
+
+We see again that the two-box model has the tendency to overfit. Here, the result claims the power is better than it really is.

@@ -1,0 +1,342 @@
+% !TEX TS-program = pdflatex
+% !TEX encoding = UTF-8 Unicode
+
+% This is a simple template for a LaTeX document using the "article" class.
+% See "book", "report", "letter" for other types of document.
+
+\documentclass[10pt]{article} % use larger type; default would be 10pt
+
+\usepackage[utf8]{inputenc} % set input encoding (not needed with XeLaTeX)
+
+\usepackage{authblk} % to add author affiliations
+% \usepackage{parskip} % turn of indentation and add space between paragraphs
+\usepackage{amsmath} % for equations
+%\usepackage{algorithm} % for algorithms
+%\usepackage[noend]{algpseudocode}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+
+
+
+\renewcommand{\algorithmicrequire}{\textbf{Input:}} %for INPUT in algorithms
+\renewcommand{\algorithmicensure}{\textbf{Output:}} % for OUTPUT
+
+%%% Examples of Article customizations
+% These packages are optional, depending whether you want the features they provide.
+% See the LaTeX Companion or other references for full information.
+
+%%% PAGE DIMENSIONS
+\usepackage{geometry} % to change the page dimensions
+\geometry{letterpaper} % or letterpaper (US) or a5paper or....
+\geometry{margin=1.3in} % for example, change the margins to 2 inches all round
+% \geometry{landscape} % set up the page for landscape
+%   read geometry.pdf for detailed page layout information
+
+\usepackage{graphicx} % support the \includegraphics command and options
+
+% \usepackage[parfill]{parskip} % Activate to begin paragraphs with an empty line rather than an indent
+
+%%% PACKAGES
+\usepackage{booktabs} % for much better looking tables
+\usepackage{array} % for better arrays (eg matrices) in maths
+\usepackage{paralist} % very flexible & customisable lists (eg. enumerate/itemize, etc.)
+\usepackage{verbatim} % adds environment for commenting out blocks of text & for better verbatim
+\usepackage{subfig} % make it possible to include more than one captioned figure/table in a single float
+% These packages are all incorporated in the memoir class to one degree or another...
+
+%%% HEADERS & FOOTERS
+\usepackage{fancyhdr} % This should be set AFTER setting up the page geometry
+\pagestyle{fancy} % options: empty , plain , fancy
+\renewcommand{\headrulewidth}{0pt} % customise the layout...
+\lhead{N. Wisniewski}\chead{}\rhead{\emph{Comparing the Means of Two Populations}}
+\lfoot{}\cfoot{\thepage}\rfoot{}
+
+%%% SECTION TITLE APPEARANCE
+\usepackage{sectsty}
+%\allsectionsfont{\sffamily\mdseries\upshape} % (See the fntguide.pdf for font help)
+% (This matches ConTeXt defaults)
+
+%%% ToC (table of contents) APPEARANCE
+\usepackage[nottoc,notlof,notlot]{tocbibind} % Put the bibliography in the ToC
+\usepackage[titles,subfigure]{tocloft} % Alter the style of the Table of Contents
+\renewcommand{\cftsecfont}{\rmfamily\mdseries\upshape}
+\renewcommand{\cftsecpagefont}{\rmfamily\mdseries\upshape} % No bold!
+
+%%% END Article customizations
+
+%%% The "real" document content comes below...
+
+\title{A Comparison of Nonparametric and Randomization Tests:  \\
+	\large Comparing the Means of Two Populations}
+
+
+\author{Nicholas Wisniewski}
+%\setlength{\affilsep}{2em}
+\renewcommand\Affilfont{\small}
+\affil{Department of Medicine (Cardiology)\\ Department of Integrative Biology and Physiology \\University of California, Los Angeles}
+
+%\date{} % Activate to display a given date or no date (if empty),
+         % otherwise the current date is printed 
+
+\begin{document}
+\maketitle
+\begin{abstract}
+        \noindent Comparing the means of two independent groups is the most common task of statistical inference. Many methods exist for this purpose, each with its advantages and disadvantages, and it's not always obvious which one to choose. For example, Student's $t$-test is the most common, but it assumes the data is normally distributed and becomes unreliable when this assumption is violated. Non-parametric methods, such as the Mann-Whitney $U$-test, are therefore often encouraged, but usually involve a sacrifice of power. Bootstrap methods have gained in popularity, but limitations are still present and each method comes with different contraindications. With so many different methods and pitfalls available, it is important for the researcher to have a measured way to make decisions about statistical methodology. Here we use Monte Carlo simulation to compare the false positive rate and power of an array of statistical tests across different conditions; we examine cases of normally distributed data with equal and unqual variance, as well as skew normal data, over a range of sample sizes. We use these results to provide a practical guide to choosing the most appropriate method for a given dataset. 
+    \end{abstract}
+\section{Introduction}
+
+When a researcher is comparing the centers (means, medians, etc.) of two independent groups, such as experimental and control groups, an array of statistical tests are available to choose from. Among the most well known formulas are Student's $t$-test, Welch's $t$-test, and the Mann-Whitney $U$-test. There are also a variety of resampling techniques, such as the bootstrap and permutation tests. Each of these methods imposes different assumptions about the data, and it is left up to the researcher to decide which method is most appropriate in a given circumstance. 
+
+Making informed decisions when choosing between these methods is important because each may become unreliable in different circumstances. Because statistical theory relies heavily on assumptions about normality, the most prominent concern is usually whether the data is normally distributed. The decision-making process usually begins by using a quantile-quantile plot, as well as distributional tests such as the Shapiro-Wilk, Anderson-Darling, Kolmogorov-Smirnov, and Cramer-von Mises tests. If the groups are normally distributed, then the prevailing argument is that a $t$-test is preferred over the non-parametric alternatives because it will have more power; it will have a better chance at detecting a true effect. 
+
+In practice, that extra power is needed most when analyzing small sample sizes. However, assessing normality becomes fundamentally difficult with small sample sizes. Quantile-quantile plots lose their interpretability when there aren't many data points. Likewise, the normality tests become underpowered, and are bad indicators of normality; the chances of detecting true non-normality are low. This presents a fundamental barrier to parametric methods, because these difficulties stem from an inherent inability to gain a representative sample with only a small number of points. Accordingly, the central limit theorem breaks down, and calculations based on the asymptotic normality of the sampling distribution no longer hold. Because there is no way to reliably verify the normality assumption with small sample size, and also to guard against outliers, scientific journals are increasingly requiring non-parametric tests unless there is \emph{a priori} reason to believe the data is normally distributed. 
+
+However, even if the population is known \emph{a priori} to be normally distributed, questions remain about which parametric test to use. The next decision is whether the variances of the two groups are equal. While Student's $t$-test assumes a single common variance, Welch's $t$-test is designed for unequal variance samples. Just as it's difficult to verify normality with small sample size, it's difficult to verify equality of variance. It's not at all clear which test researchers should be using if they have no way of reliably inferring these properties from the data.  
+
+Some researchers, therefore, argue for choosing a non-parametric test in general, as a conservative rule. However, it's not automatically clear that this is good advice. Even the Mann-Whitney $U$-test relies on assumptions about the distribution that usually go unappreciated. Athough it is commonly used as a comparison of medians, this interpretation only holds if both distributions have the same shape, and differ only in location. It is more generally testing for stochastic inequality:  whether a sample taken from one group is more likely to exceed a sample taken from the other. It's possible that a median difference can go in one direction, while the stochastic inequality goes in the other. The interpretation of the test, therefore, depends on whether the distributions have different shape. But these differences are impossible to assess with small sample size, just like normality. There is also a loss of power that comes with non-parametric methods if the data is truly normal. Although a rule of thumb exists (5\% power loss), this rule is based on asymptotic arguments, and it's unclear if it holds with small sample size. 
+
+There are also several resampling methods, such as the bootstrap and permutation tests, that offer alternatives to the above formulas. In permutation tests, the group labels are shuffled in every possible permutation in order to compute the null distribution, because the labels don't matter if the distributions are equal. In practice, this is conducted by resampling the labels without replacement in order to simulate a large subset of all permutations. Bootstrap tests, on the other hand, involve resampling the data with replacement, and come in several varieties depending on the null hypothesis being simulated. If the distributions have the same shape, then the data are combined and resampled from a common array. If the distributions have different shape, then the data can be kept separate for resampling, but are recentered so that their means or medians are equal. It is also possible to conduct rank tests by ranking the data upon each resample, and taking the means of the ranks. These methods are intuitive and easy to implement, but the same decisions remain for the researcher when choosing among resampling methods, with each method applicable only in certain circumstances. 
+
+It is essential, therefore, to use simulation studies to compare the performance across different methods. Monte Carlo simulation allows us to define the theoretical distributions from which to sample from, specifying the true values for means, standard deviations, and skew. Then, random number generation is used to sample datasets of finite length, allowing investigation of small sample size properties. By running a large number of simulations of this kind, we can compute estimates of power and false positive rates for each statistical test. The false positive rate is the fraction of simulations, with no  difference in the true means, that are statistically significant. The power, on the other hand, is the fraction of simulations, with a non-zero difference in the true means, that are statistically significant. These estimates will give us a measured approach to deciding which method is the best to use for a particular dataset.
+
+\section{Methods}
+
+Our simulations are designed as follows. First, we use Monte Carlo random number generation to simulate data, keeping total control over the true mean, variance, and skew. Then, we apply a battery of statistical tests to the data, and record the results. We repeat the simulation for a number of different effect sizes $\delta=\mu_X-\mu_Y$, and sample sizes $n$, in order to generate power curves. We repeat the simulation many times (\verb|nsim = 1000|) for each effect size and sample size, and estimate the false positive rate and power by calculating the percentage of simulations that yielded a positive test result, which we defined by the usual $p<0.05$. Here, the false positive rate corresponds to the percentage of positive test results when a null effect $\delta=0$ is being simulated, and the power corresponds to the percentage of positive test results when an effect size $\delta>0$ is being simulated. Note that the precision of the estimates is determined only by the number of simulations \verb|nsim|. We write this design using pseudocode in Procedure~\ref{alg:montecarlo}.
+
+
+\begin{algorithm}
+
+ \floatname{algorithm}{Procedure}
+\caption{Monte Carlo simulation to estimate the positive rates of a test}
+\label{alg:montecarlo}
+\begin{algorithmic} 
+\REQUIRE distribution $\theta$, effect size $\delta$, sample size $n$, significance $\alpha,$ simulations $nsim$
+\FOR{\textbf{each} sample size $n$}
+\FOR{\textbf{each} effect size $\delta$}
+\FOR{$i=1$ to $nsim$}
+ \STATE $X \leftarrow$ draw $n_X$ samples from $p(x|\theta)$
+ \STATE $Y \leftarrow$ draw $n_Y$ samples from $p(y|\theta+\delta)$
+ \STATE $pvalue_i \leftarrow$ test($X,Y$)
+ \ENDFOR
+ \STATE $rate_{\delta,n} \leftarrow$ fraction of simulations with a positive test: $(\#pvalue<\alpha)/nsim$ 
+\ENDFOR
+\ENDFOR
+\ENSURE $rate$
+\end{algorithmic}
+\end{algorithm}
+
+
+\subsection{Monte Carlo simulation}
+
+We implemented our simulations using the R programming language. We used the \verb|`rnorm'| random number generator to create normally distributed data at various sample sizes, and \verb|`rsnorm'| skew normal random number generator in the \verb|`fGarch'| package to simulate skewed data. The skew normal distribution is specified by location parameter $\mu$, scale parameter $\sigma$, skewness parameter $\xi$,
+
+\begin{align}
+p(x) = \frac{1}{\sigma}\sqrt{\frac{2}{\pi}}e^{-\frac{(x-\mu)^2}{2\sigma^2}}\int_{-\infty}^{\xi(\frac{x-\mu}{\sigma})} e^{-\frac{t^2}{2}} dt.
+\end{align}
+
+\noindent Here, the normal distribution is seen as a special case when $\xi = 0$, while the distribution is right skewed if $\xi>0$, and left skewed if $\xi<0$. 
+
+We simulated data for three cases: equal variance, unequal variance, and skewed. For the equal variance case, we set $\sigma_X=\sigma_Y=1$. For the unequal variance case, we set $\sigma_X=1$ and $\sigma_Y=4$. For the skew case, we set  $\sigma_X=\sigma_Y=1$, but simulated large and opposite skews, $\xi_X=-1000$ and $\xi_Y=1000$. We show example violin plots of the null hypothesis (equal means) for each case in Figure ~\ref{fig:cases}. We simulated mean differences by keeping group X fixed, $\mu_X=0$, and running at several different values of $\mu_Y$. We also simulated at different sample sizes, ranging from $n=4$ to $n=100$. For simplicity, we only simulated balanced designs; for example, $n=6$ implies $n_X=3$ and $n_Y=3$.
+
+\begin{figure}
+  \includegraphics[width=\linewidth]{distributions2.pdf}
+  \caption{Simulation distributions. (a) We simulate the equal variance case. (b) We simulate the unequal variance case. (c) We simulate the skew case.}
+  \label{fig:cases}
+\end{figure}
+
+
+
+
+
+\subsection{Bootstrap methods}
+
+We compared different implementations of the bootstrap. The bootstrap procedure is defined by resampling the data with replacement, hundreds or thousands of times, in order to estimate sampling error. For each resample, an estimator or test statistic is computed, until enough resamples exist to represent a bootstrap distribution for that statistic. The properties of the bootstrap distribution, such as the center, spread, and skew, are then taken to be representative of the sampling distribution. In this way, the bootstrap can be viewed as a general way to non-parametrically compute the standard error of an arbitrary estimator, even when theoretical results are difficult or intractible, or when the central limit theorem is violated and the sampling distribution is not normal.   
+
+This procedure can be extended to compare the means of two groups in a number of ways, which we depict schematically in Figure~\ref{fig:schematic}. In the most basic method, the null hypothesis is simulated by combining the two groups being tested into one big group, in order to represent the population distribution. For this reason, we refer to this method as the \emph{bigbox} bootstrap. The rationale for this approach is that if the data come from the same underlying distribution, the group labels don't matter, and the population is best estimated by simply pooling the two groups. New boostrap groups are resampled directly from the pooled data, and the test statistic is calculated for each iteration (Fig.~\ref{fig:schematic}a). We show pseudocode for this in Procedure~\ref{alg:bigbox}.
+
+\begin{algorithm}
+ \floatname{algorithm}{Procedure}
+\caption{The bigbox bootstrap test}
+\label{alg:bigbox}
+\begin{algorithmic} 
+\REQUIRE data  $X$ and $Y$, bootstraps $nboot$
+\STATE $XY \leftarrow$ combine groups $X$ and $Y$
+\FOR{$i=1$ to $nboot$}
+\STATE $xy \leftarrow$ draw $n$ samples from $XY$ with replacement
+ \STATE $(x,y) \leftarrow$ split $xy$ back into groups
+ \STATE $\delta_i \leftarrow$ mean($x$) $-$ mean($y$)
+ \ENDFOR
+ \STATE $pvalue \leftarrow$ fraction of $\lvert \delta_i \rvert \geq \lvert \hat{\delta} \rvert$
+ \ENSURE $pvalue$
+\end{algorithmic}
+\end{algorithm}
+
+
+
+However, a researcher often wishes to compare the means of two distributions that have unequal variance. In this case, combining the two groups into a bigbox may be inappropriate because the null hypothesis is no longer that the data come from a single underlying distribution, but instead from two distributions of equal mean but unequal spread. To simulate this null hypothesis, the data remain separated in the original groups to maintain their unequal variances, but we recenter each group so the means are equal. Bootstrap groups are resampled from the recentered groups, and the test statistic is calculated for each iteration (Fig.~\ref{fig:schematic}b). For this reason, we refer to this method as the \emph{twobox} bootstrap, and show pseudocode in Procedure~\ref{alg:twobox}.
+
+
+\begin{algorithm}
+ \floatname{algorithm}{Procedure}
+\caption{The twobox bootstrap test}
+\label{alg:twobox}
+\begin{algorithmic} 
+\REQUIRE data $X$ and $Y$, bootstraps $nboot$
+\STATE $X_0 \leftarrow X $ $-$ mean($X$) 
+\STATE $~Y_0  \leftarrow Y $ $-$ mean($Y$) 
+\FOR{$i=1$ to $nboot$}
+ \STATE $x \leftarrow$ draw $n_X$ samples from $X_0$ with replacement
+ \STATE $y \leftarrow$ draw $n_Y$ samples from $Y_0$ with replacement
+ \STATE $\delta_i \leftarrow$ mean($x$) $-$ mean($y$)
+ \ENDFOR
+ \STATE $pvalue \leftarrow$ fraction of $\lvert \delta_i \rvert \geq \lvert \hat{\delta} \rvert$
+\ENSURE $pvalue$
+\end{algorithmic}
+\end{algorithm}
+
+
+
+Although the bigbox and twobox bootstraps make no distributional assumptions, it is possible for outliers to affect the results if the mean is being estimated. It is straighforward to substitute the median as the test statistic in these methods, but the median can be an unstable estimator, especially with small sample size. One option, called the \emph{smoothed} bootstrap, attempts to stabilize the median by adding a small amount of random noise to each sample. No general rule exists for how much noise should be added, however. In our simulations, we add normally distributed random noise of standard deviation $s/2\sqrt{n}$ to each sample, where $s$ is the estimate standard deviation of either the pooled data, or the data in each group taken separately. 
+
+Instead of using medians, it's often more useful to transform the data into ranked values, analogous to non-parametric tests like the Mann-Whitney $U$-test. The bootstrap rank test looks identical to the bigbox bootstrap, but with one difference: the resampled data is transformed to ranks before the test statistic is computed for each iteration (Fig.~\ref{fig:schematic}c). We show this in pseudocode in Procedure~\ref{alg:rank}.
+
+\begin{algorithm}
+ \floatname{algorithm}{Procedure}
+\caption{The rank bootstrap test}
+\label{alg:rank}
+\begin{algorithmic} 
+\REQUIRE data $X$ and $Y$, bootstraps $nboot$
+\STATE $XY \leftarrow$ combine groups $X$ and $Y$
+\FOR{$i=1$ to $nboot$}
+ \STATE $xy \leftarrow$ draw $n$ samples from $XY$ with replacement
+ \STATE $r_{xy} \leftarrow$ rank($xy$)
+ \STATE $(r_{x}, r_{y}) \leftarrow$ split $r_{xy}$ back into original groups
+ \STATE $\delta_i \leftarrow$ mean($r_{x}$) $-$ mean($r_{y}$)
+ \ENDFOR
+ \STATE $pvalue \leftarrow$ fraction of $\lvert \delta_i \rvert \geq \lvert \hat{\delta} \rvert $
+\ENSURE $pvalue$
+\end{algorithmic}
+\end{algorithm}
+
+
+
+
+\begin{figure}
+  \includegraphics[width=\linewidth]{bootstrap_schematic.pdf}
+  \caption{Bootstrap algorithm schematics. (a) Bigbox bootstrap. (b) Twobox bootstrap. (c) Rank bootstrap.}
+  \label{fig:schematic}
+\end{figure}
+
+
+
+
+
+
+
+
+
+
+\section{Results}
+For each simulation, we evaluated a battery of 8 tests, consisting of the following methods:
+\begin{enumerate}
+\setlength\itemindent{.25in}
+\setlength\itemsep{0ex}
+\item Student's $t$-test
+\item Welch's $t$-test 
+\item Mann-Whitney $U$-test (Wilcox)
+\item Permulation test
+\item Bigbox bootstrap for means 
+\item Twobox bootstrap for means
+\item Rank bootstrap
+\item Rank permutation 
+\end{enumerate} 
+
+
+\subsection{False Positive Rate}
+
+First, we examined the false positive rates of the tests, under varying distributions (Fig.~\ref{fig:fpr}) The first thing we notice is the extraordinarily high false positive rates of some of the tests at extremely small sample size ($n=4$ and $n=6$). The tests showing this behavior are all randomization tests: twobox bootstrap, rank bootstrap, permutation, and rank permutation tests, which all reach a false positive rate of 38\% in the unequal variance case at $n=4$, and around 14\% at $n=6$. 
+
+However, the nonparametric alternative, the Wilcox or Mann-Whitney $U$-test is not at all functional at these sample sizes. It has a false positive rate of zero because it doesn't have the power to reject any hypotheses at that sample size. In fact, for $n=4$, the lowest possible p-value attainable is $1/3$, and for $n=6$ it is $1/10$.
+
+That leaves three tests that are able to perform well at extremely small sample size: Student's $t$-test, Welch's $t$-test, and the bigbox bootstrap. Of these, Welch's $t$-test consistently has the lowest false positive rate under the different conditions, while Student's $t$-test and the bigbox bootstrap are very similar.
+
+As sample size increases, the differences between false positive rates diminishes. However, the twobox bootstrap continually has the worst false positive rate until much larger sample sizes are used. This tells us that the twobox bootstrap is fatally overfitting the data. Small sample sizes lead to poor estimates of variance, and the twobox bootstrap suffers doubly by estimating separate variances on two groups that then have half the sample size. This effect looks to persist until sample sizes exceed $n\geq60$
+
+At $n\geq30$ the rank-based tests, such as the rank bootstrap, rank permutation, and Mann-Whitney-Wilcoxon, typically had higher false positive rates. For the skew case, this is explainable by the fact that, while we are simulating the case of equal means, these tests are testing for stochastic dominance instead. These positives are therefore not actually false positives with respect to that test, because our simulated null indeed has some stochastic dominance. However, the explanation for rank tests having higher false positive rate in the equal and unequal variance cases is not apparent. 
+
+
+\begin{figure}
+  \includegraphics[width=\linewidth]{Hoffman/FPR_triple.pdf}
+  \caption{False positive rate comparison. A. equal variance normally distributed data. B. Unequal variance normally distributed data. C. skew-normally distributed data.}
+  \label{fig:fpr}
+\end{figure}
+
+
+
+\subsection{Normal distributions with equal variance}
+The power curves for this case are shown in Figure~\ref{fig:equalvar}. 
+
+Turning our interest to power, the bigbox bootstrap looks to have the best power as sample size rises above $n\geq8$. Power loss is experienced by the rank bootstrap and Mann-Whitney $U$-test, but this difference becomes small above $n\geq16$. 
+
+
+
+\begin{figure}
+  \includegraphics[width=\linewidth]{Hoffman/power_equal_var.pdf}
+  \caption{Power curves for tests on normally distributed samples with equal variance.}
+  \label{fig:equalvar}
+\end{figure}
+
+
+
+
+
+\subsection{Normal distributions with unequal variance}
+The power curves for this case are shown in Figure~\ref{fig:unequalvar}. 
+
+Again, the rank bootstrap has a false positive rate of 12\%, but it also has the highest power for small sample size. As sample size increases, the bigbox bootstrap seems to perform best for $n<30$. 
+
+Finally, the smoothed bootstrap on the medians helps again at small to moderate samples, but inflates the false positive rate asymptotically. This is explained by the data becoming oversmoothed; the smoothing noise was added by computing the pooled variance. However, in this case, estimating the variances of the groups separately can correct this problem.
+
+
+\begin{figure}
+  \includegraphics[width=\linewidth]{Hoffman/power_unequal_var.pdf}
+  \caption{Power curves for tests on normally distributed samples with unequal variance.}
+  \label{fig:unequalvar}
+\end{figure}
+
+
+
+
+
+\subsection{Skewed normal distributions}
+The power curves for this case are shown in Figure~\ref{fig:skew}. To understand these power curves, it is important to first understand that when the means are equal, the medians are not because the distributions are skewed. Thus, we can encounter a situation where the mean difference is positive, while the median difference is negative. This shows up in the power curves, where all the tests seem to either dip slightly in power or remain flat as the effect size increases, before finally increasing monotonically. We note that for the skew normal parameters used here, when the means are equal, the difference in medians is about 0.4. This happens to be right where the minimum for the median based methods lies. The rank tests, however, do not line up at this minimum. Rank tests are often said to test the equivalence of medians, but they are actually testing if one is stochastically greater than the other. If further assumptions are made, like that all but the center of the two distributions are equal, then stochastic dominance translates to a test of the medians. But in the case of oppositely skewed distributions, the understanding of the Mann-Whitney $U$-test as a test of medians is incorrect.
+
+We again notice that the twobox bootstrap has inflated false positive rate across all sample sizes. Welch's $t$-test is the only test that maintains the expected $\alpha=0.05$. However, this superiority is not maintained as the sample size increases; by $n\geq8$ the Mann-Whitney $U$-test has a better false positive rate, with a comparable power. And as sample size increases to $n\geq16$, the rank bootstrap also shares this top spot.
+
+If our concern is power, the leading tests (considering the shifts in minima explained above) look like the rank bootstrap and Mann-Whitney $U$-test. The bigbox smoothed median bootstrap also looks promising asymptotically, but faces problems for typical sample sizes.
+
+
+\begin{figure}
+  \includegraphics[width=\linewidth]{Hoffman/power_skew.pdf}
+  \caption{Power curves for skew normally distributed samples with opposite skew.}
+  \label{fig:skew}
+\end{figure}
+
+
+
+\section{Conclusion}
+We have used Monte Carlo simulation to generate estimates of the false positive rate and power curve associated with each test. After running simulations at multiple sample sizes, we can now make informed decisions about which tests to run for a given dataset. Our data-specific recommendations are:
+
+\begin{enumerate}
+\item At a tiny sample size $n=6$, the rank bootstrap has the highest power, and is guarded against outliers, but comes with a high false positive rate of 12\%. Welch's t-test is the most conservative test in terms of the false positive rate, staying at the expected 5\%.  Note that this is cautionary to journal recommendations that say to always use ranks! 
+\item For equal variance, normally distributed data, use the bigbox bootstrap for $n\geq10$. It is the most powerful test, and keeps a low false positive rate (5\% for $n\geq8$).
+\item For unequal variance, normally distributed data, use the twobox bootstrap for $n\geq30$. The twobox overfits for sample sizes smaller than that, and gets an inflated false positive rate upwards of $25\%$ for $n=6$. The bigbox bootstrap works best for $8\leq n <30$, with a false positive rate no more than 7\%. 
+\item For skewed data, use the rank bootstrap.
+\end{enumerate}
+
+\noindent Finally, we notice that bootstrapping appears as our recommended method in every case. We can therefore summarize our results entirely from the point of view of the bootstrap: use the bigbox bootstrap if your data is symmetric, and rank bootstrap if it is skewed or if $n<10$. Only use the twobox bootstrap if the variances are unequal and the sample size is $n\geq 30$; otherwise it overfits and inflates the false positive rate. 
+
+
+
+
+\end{document}

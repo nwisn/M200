@@ -1,0 +1,494 @@
+---
+title: "Two-Way Repeated Measures ANOVA"
+author: "Nicholas Wisniewski"
+date: "May 3, 2016"
+output:
+  html_document:
+    toc: true
+    theme: spacelab
+    number_sections: true
+---
+```{r, echo=FALSE}
+library(knitr)
+knit_hooks$set(purl = function(before, options) {
+  if (before) return()
+  input  = current_input()  # filename of input document
+  output = paste(tools::file_path_sans_ext(input), 'R', sep = '.')
+  if (knitr:::isFALSE(knitr:::.knitEnv$tangle.start)) {
+    assign('tangle.start', TRUE, knitr:::.knitEnv)
+    unlink(output)
+  }
+  cat(options$code, file = output, sep = '\n', append = TRUE)
+})
+```
+
+# Dataset
+Let's make up some frog data like in Drummond and Vowler's *Analysis of variance: variably complex*. We are interested in seeing if diet has an impact on jumping distance in frogs. Here, frogs were given two different diets, and followed for 3 timepoints. If there is an effect due to the diet, can we tell if is it uniform across time, or if the effects are time dependent?
+```{r, echo=T}
+# Initialization
+set.seed(100)
+n <- 15
+sigma <- 100
+
+# Monte Carlo 
+t1normal <- rnorm(n, mean=600, sd=sigma)
+t1super <- rnorm(n, mean=600, sd=sigma)
+t2normal <- rnorm(n, mean=600, sd=sigma)
+t2super <- rnorm(n, mean=650, sd=sigma)
+t3normal <- rnorm(n, mean=600, sd=sigma)
+t3super <- rnorm(n, mean=800, sd=sigma)
+
+# Put together into a dataframe
+df <- data.frame(distance = c(t1normal, t1super, t2normal, t2super, t3normal, t3super),
+                 time = c(rep("time1", 2*n), rep("time2", 2*n), rep("time3", 2*n)),
+                 diet =  rep(c(rep("normal", n), rep("superfood", n)), 3),
+                 frog = rep(1:30,3))
+head(df,20)
+```
+
+
+```{r, echo=F, eval=F}
+dev.off()
+par(mar=c(10,3,2,2))
+boxplot(distance ~ time + diet, horizontal=F, las=2, data=df, col=c(rep("red",3),rep("blue",3)))
+stripchart(distance ~ time + diet, data=df, add=T, method='jitter', vertical=T, pch=16, col="grey")
+abline(h=mean(df$distance), lty='dotted')  # draw dotted line at the grand mean
+```
+
+First, let's take a look at the data. If we look according to diet, we see that all timepoints jump the same distance on a normal diet. However, when given superfoods, differences appear over time. This tells us there's an interaction between time and time.
+
+```{r, eval=T, echo=F}
+par(mar=c(7,5,2,2))
+par(mfrow=c(1,2))
+boxplot(distance ~ time, horizontal=F, las=2, data=subset(df, df$diet=="normal"), main="normal diet", ylab="distance jumped (cm)")
+stripchart(distance ~ time, data=subset(df, df$diet=="normal"), add=T, method='jitter', vertical=T, pch=16, col="red")
+
+boxplot(distance ~ time, horizontal=F, las=2, data=subset(df, df$diet=="superfood"), main="superfood diet", ylab="distance jumped (cm)")
+stripchart(distance ~ time, data=subset(df, df$diet=="superfood"), add=T, method='jitter', vertical=T, pch=16, col="blue")
+```
+
+
+We want to test the null hypothesis, which is that all the groups were sampled from the same population. To do this, we specifically test the hypothesis that the group means are equal using ANOVA. The difference this time is that the 
+
+
+# Repeated-Meausures ANOVA in R
+
+The standard R function for repeated-measures ANOVA is the linear mixed-effect model: lmer().
+
+```{r, eval=T, echo=T}
+library(lme4)
+library(lmerTest)
+model <- lmer(distance ~ diet * time + (1|frog), data=df)
+result <- anova(model)
+pval.lm <- result$`Pr(>F)`
+result
+```
+
+We see that the time interaction is statistically significant. We should therefore be careful about interpreting the main effects (as seen in the boxplots of the marginals); we can tell from the interaction plot below that they only show up due to the interaction term.
+
+Let's look at the interaction plot. We notice that the timepoints look the same while on a normal diet, but the effect of the superfood diet grows over time; there is an interaction.
+```{r, echo=F}
+interaction.plot(df$time, df$diet, df$distance, 
+                 fun = mean,
+                 trace.label = "Diet",
+                 xlab="Frog time", 
+                 ylab="distance jumped",
+                 col=c("red","blue"),
+                 lwd = 3, lty = 1)
+
+```
+
+
+
+Let's look at the marginal distributions, which represent the main effects of time and diet. Notice how the marginals can be misleading. The differences between time only appear with the superfood diet, so it is misleading to say that some time can jump farther in general (left). And the gain distance due to superfood (right) is not experienced by all timepoints; timepoint 1 is unaffected by superfood.
+```{r, echo=F}
+par(mar=c(7,5,2,2))
+par(mfrow=c(1,2))
+plot(distance ~ time + diet, data=df, las=2, xlab="",  ylab="distance jumped (cm)")
+```
+
+
+
+```{r, eval=F, echo=F}
+# get the F-statistic from lm()
+F0 = result$`Pr(>F)`
+
+# Bootstrap the F-statistics to compute the p-values
+deals <- 1000
+bootF <- matrix(NA, nrow=deals, ncol=length(result$`Pr(>F)`))
+for(i in 1:deals){
+    df$boot <- sample(df$distance, replace=T)
+    bootresult <- anova(lmer(boot ~ diet * time + (1|frog), data=df))
+    bootF[i,] <- bootresult$`Pr(>F)`
+}
+pval.lmboot <- colSums(sweep(bootF, 2, F0,"-") > 0) / deals
+```
+
+
+
+```{r, eval=F, echo=F}
+par(mfrow=c(1,3))
+xlabel <- c("F diet", "F time", "F interaction")
+for(i in 1:3){
+    hist(bootF[,i], breaks='FD', main= paste("Bootstrapped p=",pval.lmboot[i],sep=""), xlab=xlabel[i])
+    abline(v=F0[i], col='red')
+    text(x=F0[i], y=100, labels=paste("p=",pval.lmboot[i],sep=""))
+}
+```
+
+## One-Way ANOVA: Interpreting the interaction
+
+The significant interaction term suggests that we should not trust the main effects from the repeated measures ANOVA. If diet affects different times differently, we should look at the effects in each time slice separately. We can do this by investigating the simple main effects found by using 1-way ANOVA on the subgroups. 
+
+First, we look for differences between diets at each time separately. So these are not repeated-measures since they're at a single time slice.
+
+```{r}
+df.time <- split(df, df$time)
+
+anova(lm(distance ~ diet, data=df.time$time1)) # time 1
+anova(lm(distance ~ diet, data=df.time$time2)) # time 2
+anova(lm(distance ~ diet, data=df.time$time3)) # time 3
+```
+
+```{r, echo=F}
+par(mfrow=c(1,3))
+a1 <- anova(lm(distance ~ diet, data=df.time$time1)) # time 1 
+a2 <- anova(lm(distance ~ diet, data=df.time$time2)) # time 2
+a3 <- anova(lm(distance ~ diet, data=df.time$time3)) # time 3
+boxplot(distance ~ diet, data=df.time$time1, ylab="distance jumped (cm)", main=c("time 1",paste("p=",round(a1$`Pr(>F)`[1],4))))
+boxplot(distance ~ diet, data=df.time$time2, ylab="distance jumped (cm)", main=c("time 2",paste("p=",round(a2$`Pr(>F)`[1],4))))
+boxplot(distance ~ diet, data=df.time$time3, ylab="distance jumped (cm)", main=c("time 3",paste("p=",signif(a3$`Pr(>F)`[1],2))))
+
+```
+
+
+The diet has a statistically significant effect at time 3, but not the others. If there were several different diets, we would be interested in looking next at post-hoc t-tests. But there are only two diets in this experiment, so the 1-way ANOVA's we just did were equivalent to t-tests.
+
+Next, we look for differences between time in each diet group. These are repeated measures.
+
+```{r}
+df.diet <- split(df, df$diet)
+
+anova(lmer(distance ~ time + (1|frog), data=df.diet$normal)) #normal
+anova(lmer(distance ~ time + (1|frog), data=df.diet$superfood)) #superfood
+```
+
+```{r, echo=F}
+a1 <- anova(lmer(distance ~ time + (1|frog), data=df.diet$normal)) #normal
+a2 <- anova(lmer(distance ~ time + (1|frog), data=df.diet$superfood)) #superfood
+par(mfrow=c(1,2))
+boxplot(distance ~ time, data=df.diet$normal, ylab="distance jumped (cm)", main=c("Normal food", paste("p=", round(a1$`Pr(>F)`[1],4))))
+boxplot(distance ~ time, data=df.diet$superfood, ylab="distance jumped (cm)", main=c("Superfood", paste("p=", round(a2$`Pr(>F)`[1],4))))
+```
+
+Frogs on the superfood diet have significant differences across time. But there is no difference between timepoints on the normal diet.
+
+This leads to the question: what are the differences between timepoints in the superfood diet group? We already can tell that timepoint 3 jumps farther than the earler timepoints. But to quantify this, we will do pairwise paired t-tests between each time. 
+
+
+### Pairwise tests
+
+We do the posthoc tests on the superfood diets:
+```{r}
+pairwise.t.test(df.diet$superfood$distance, df.diet$superfood$time, paired=T, p.adjust="bonferroni") # Super diet
+```
+
+The result shows that timepoint 3 is statistically significantly different than the rest, while time1 and time2 are not statistically significantly different.
+
+
+## Verifying assumptions
+
+We could check the homogeneity of variance assumption using a test. If the data is normally distributed, the Bartlett test is the most powerful test to use. However, it is sensitive to data which is not non-normally distribution; it is more likely to return a “false positive” when the data is non-normal. There is also Levene's test, which is more robust to departures from normality than Bartlett's test. And finally, there is the Fligner-Killeen test, which is a non-parametric test that is very robust against departures from normality.
+```{r}
+bartlett.test(distance ~ interaction(diet,time), data=df)
+fligner.test(distance ~ interaction(diet,time), data=df)
+library(car)
+leveneTest(distance ~ interaction(diet,time), data=df)
+```
+
+It fails all the tests of homogeneity of variances. But since we set the true variances equal, we know these are false positives. Maybe these tests don't work right in 2-way models.
+
+But there are also some plots to look at. The residual plot shows if there is a pattern in the residuals. It should indicate homoscedasticity. We can also look at what's happening for each frog individually over time.
+```{r, echo=F}
+plot(model)
+```
+
+We can also look at the results for each individual frog, and the model predictions for each frog.
+```{r, echo=T}
+library(lattice)
+lattice::xyplot(distance~time| frog, groups=diet, data=df, type=c('p','r'), auto.key=F)
+lattice::xyplot(fitted(model)~time| frog, groups=diet, data=df, type=c('p','r'), auto.key=F)
+```
+
+
+# Nonparametric tests
+
+No good R package exists. We can transform to ranks. Note that this is not recommended, as Monte Carlo studies by Sawilowsky show problems.
+
+```{r}
+model <-  lmer(rank(distance) ~ diet * time + (1|frog), data=df)
+result <- anova(model)
+pval.rank <- result$`Pr(>F)`
+result
+```
+
+Again, we see an interaction.
+
+## One-Way ANOVA: Interpreting the interaction
+We can do the one-way tests for each subroup. We begin with looking at diet in each time separately. Since they are time slices, this is not a repeated-measures test.
+```{r, eval=T}
+kruskal.test(distance~diet, data=df.time$time1) # diet at t1
+kruskal.test(distance~diet, data=df.time$time2) # diet at t2
+kruskal.test(distance~diet, data=df.time$time3) # diet at t3
+```
+
+```{r, echo=F}
+par(mfrow=c(1,3))
+a1 <- kruskal.test(distance~diet, data=df.time$time1) # diet at t1
+a2 <- kruskal.test(distance~diet, data=df.time$time2) # diet at t2
+a3 <- kruskal.test(distance~diet, data=df.time$time3) # diet at t3
+boxplot(distance ~ diet, data=df.time$time1, ylab="distance jumped (cm)", main=c("time 1",paste("p=",round(a1$p.value,4))))
+boxplot(distance ~ diet, data=df.time$time2, ylab="distance jumped (cm)", main=c("time 2",paste("p=",round(a2$p.value,4))))
+boxplot(distance ~ diet, data=df.time$time3, ylab="distance jumped (cm)", main=c("time 3",paste("p=",signif(a3$p.value,2))))
+
+```
+
+We see that there is a statistically significant difference in treefrogs between the mean distance jumped on normal diets and on superfood. This difference does not appear in the other frogs.
+
+Next, we look at differences between time within each diet subgroup. This is repeated-measures, and is done using the Friedman test.
+```{r}
+friedman.test(distance~time|frog, data=df.diet$normal) # time differences in normal diet subgroup
+friedman.test(distance~time|frog, data=df.diet$superfood) # time differences in superfood diet subgroup
+```
+
+```{r, echo=F}
+a1 <- friedman.test(distance~time|frog, data=df.diet$normal) # time differences in normal diet subgroup
+a2 <- friedman.test(distance~time|frog, data=df.diet$superfood) # time differences in superfood diet subgroup
+par(mfrow=c(1,2))
+boxplot(distance ~ time, data=df.diet$normal,  ylab="distance jumped (cm)",main=c("Normal food", paste("p=", round(a1$p.value,4))))
+boxplot(distance ~ time, data=df.diet$superfood, ylab="distance jumped (cm)", main=c("Superfood", paste("p=", round(a2$p.value,4))))
+```
+
+We see that there is a statistically significant difference between timepoints in the superfood subgroup. To quantify these differences, we will use nonparametric post-hoc tests.
+
+
+### Pairwise tests
+For post-hoc testing, we can use pairwise paired Mann-Whitney U tests. We look for differences between time in the superfood group.
+```{r}
+pairwise.wilcox.test(df.diet$superfood$distance, df.diet$superfood$time, paired=T, p.adjust="bonferroni") # Superfood
+```
+```{r, echo=F}
+par(mfrow=c(1,1))
+boxplot(distance ~ time, data=df.diet$superfood, ylab="distance jumped (cm)", main=c("Superfood"))
+```
+
+We see that timepoint 3 is different from the rest.
+
+
+# Bootstrap tests
+
+Let's construct a more general bootstrap repeated-measures ANOVA for ourselves. First, let's define some preliminary functions to compute the sum of squares, sum of abs, and the F-like statistic. The difference here is a correction to the SSW term, subtracting the within subject variation.
+
+```{r, eval=T}
+# Define functions to compute the Sum of Squares, and Sum of Abs
+ssq <- function(x) sum(x^2)
+sab <- function(x) sum(abs(x))
+
+# Compute the SS_subject term
+SSsubject <- function( X, subject, f2, center=mean, agg=ssq){
+    long <- data.frame(cbind(subject, f2, X))
+    wide <- reshape(long, v.names="X", idvar = "subject", timevar = "f2",direction = "wide")
+    k <- ncol(wide[,-1])
+    subjectMeans <- rowMeans(wide[,-1])
+    SSsubject <- k*agg(subjectMeans - center(X))
+    return( SSsubject)
+}
+
+# A more general function to compute the F-statistic
+Fstat.2wayRM <- function( X, f1, f2, subject, center=mean, agg=ssq, rank=FALSE) { 
+    if (rank==FALSE){Y = X} else{Y = rank(-X)}
+    mu <- center(Y)  #Grand Mean
+    groupMeans.f1 <- ave( Y, f1, FUN=center ) #Pool f1
+    groupMeans.f2 <- ave( Y, f2, FUN=center ) #Pool f2
+    groupMeans.int <- ave( Y, f1, f2, FUN=center ) #Cell means
+    SSB.f1 <- agg(groupMeans.f1 - mu)
+    SSB.f2 <- agg(groupMeans.f2 - mu)
+    SSB.int <- agg( groupMeans.int - (groupMeans.f1 + groupMeans.f2 - mu) )
+    SSW <- agg(Y - groupMeans.int)
+    SSsub <- SSsubject(Y, subject, f2, center=center, agg=agg)
+    SSe <- SSW - SSsub
+    return( c(f1=SSB.f1 , f2=SSB.f2, int=SSB.int) /  SSe )
+}
+
+# Recenter each of the timepoints before resampling
+center.time <- function( X, f2, center=mean){
+    timeMeans <- ave( X, f2, FUN=center )
+    return(X - timeMeans)
+}
+
+# Convert wide dataframe to long
+wideToLong <- function(wide, timecols, timenames){
+    long <- reshape(wide, varying = timecols, v.names = "X", timevar = "f2", times = timenames, direction = "long")
+    return(long)
+}
+
+
+```
+
+
+
+
+## F-statistic using L2-norm (sum of squared deviations around the mean)
+
+Now let's implement the bootstrap using the mean and sum of squares:
+
+```{r, eval=T}
+X <- df$distance
+f1 <- df$diet
+f2 <- df$time  # f2 must be time in order for the code to work
+subject <- df$frog
+deals <- 10000
+
+# initialize some new dataframes
+Y <- center.time(X, f2, center=mean) # recenter timepoints
+long <- data.frame(subject, f1, f2, Y)  # put into a long dataframe
+wide <- reshape(long, v.names="Y", timevar="f2", idvar="subject", direction="wide") # convert to short dataframe to resample subjects
+
+# initialize bootstrap holders
+boot.wide <- wide # initialize
+bootF <- matrix(NA, nrow=deals, ncol=3) # preallocate
+indices <- 1:nrow(wide) # initialize
+
+# Bootstrap
+F0 <- Fstat.2wayRM(X, f1, f2, subject, center=mean, agg=ssq, rank=F)
+for(i in 1:deals){
+    boot.i <- sample(indices, replace=T)  # resample subjects
+    boot.wide[,3:5] <- wide[boot.i,3:5]  # get resampled data, which keeps the temporal samples linked
+    boot.long <- wideToLong(boot.wide, names(boot.wide)[3:5])  # convert to long format
+    bootF[i,] <- Fstat.2wayRM(boot.long$X, boot.long$f1, boot.long$f2, boot.long$subject, center=mean, agg=ssq, rank=F)
+}
+pval.L2 <- colSums(sweep(bootF, 2, F0,"-") > 0) / deals
+   
+```
+
+Take a look at the null distribution for the F statistic:
+
+```{r, eval=T, echo=F}
+par(mfrow=c(1,3))
+xlabel <- c("F diet", "F time", "F interaction")
+for(i in 1:3){
+    hist(bootF[,i], breaks='FD',  main= paste("Bootstrapped p=",pval.L2[i],sep=""), xlab=xlabel[i])
+    abline(v=F0[i], col='red')
+    text(x=F0[i], y=100, labels=paste("p=",pval.L2[i],sep=""))
+}
+```
+
+
+```{r, eval=F, echo=F}
+dof <- result$Df
+titlevec <- c("QQ plot for F diet", "QQ plot for F time", "QQ plot for F interaction")
+par(mfrow=c(1,3))
+for (i in 1:3){
+    qqplot( qf( seq(0,1,length=deals),dof[i], dof[4]), bootF, 
+        main=titlevec[i], 
+        xlab="Theoretical F Quantiles", 
+        ylab="Bootstrap F-like Quantiles")
+abline(0, dof[i]/dof[4], col='red')
+}
+
+```
+
+
+
+
+
+
+## F-statistic using L1-norm (sum of absolute deviations around the mean)
+
+Now let's implement the bootstrap using the mean and sum of absolute deviations:
+
+```{r, eval=T}
+F0 <- Fstat.2wayRM(X, f1, f2, subject, center=mean, agg=sab, rank=F)
+for(i in 1:deals){
+    boot.i <- sample(indices, replace=T)  # resample subjects
+    boot.wide[,3:5] <- wide[boot.i,3:5]  # get resampled data, which keeps the temporal samples linked
+    boot.long <- wideToLong(boot.wide, names(boot.wide)[3:5])  # convert to long format
+    bootF[i,] <- Fstat.2wayRM(boot.long$X, boot.long$f1, boot.long$f2, boot.long$subject, center=mean, agg=sab, rank=F)
+}
+pval.L1 <- colSums(sweep(bootF, 2, F0,"-") > 0) / deals
+
+```
+
+Take a look at the null distribution for the F statistic. We get a very similar p-value:
+
+```{r, eval=T, echo=F}
+par(mfrow=c(1,3))
+xlabel <- c("F diet", "F time", "F interaction")
+for(i in 1:3){
+    hist(bootF[,i], breaks='FD',  main= paste("Bootstrapped p=",pval.L1[i],sep=""), xlab=xlabel[i])
+    abline(v=F0[i], col='red')
+    text(x=F0[i], y=100, labels=paste("p=",pval.L1[i],sep=""))
+}
+```
+
+
+
+
+
+## Rank test
+
+Now let's implement the bootstrap using ranks:
+
+```{r, eval=T}
+F0 <- Fstat.2wayRM(X, f1, f2, subject, center=mean, agg=ssq, rank=T)
+for(i in 1:deals){
+    boot.i <- sample(indices, replace=T)  # resample subjects
+    boot.wide[,3:5] <- wide[boot.i,3:5]  # get resampled data, which keeps the temporal samples linked
+    boot.long <- wideToLong(boot.wide, names(boot.wide)[3:5])  # convert to long format
+    bootF[i,] <- Fstat.2wayRM(boot.long$X, boot.long$f1, boot.long$f2, boot.long$subject, center=mean, agg=ssq, rank=T)
+}
+pval.rankboot <- colSums(sweep(bootF, 2, F0,"-") > 0) / deals
+
+```
+
+Take a look at the null distribution for the F statistic. We get a very similar p-value:
+
+```{r, eval=T, echo=F}
+par(mfrow=c(1,3))
+xlabel <- c("F diet", "F time", "F interaction")
+for(i in 1:3){
+    hist(bootF[,i], breaks='FD',  main= paste("Bootstrapped p=",pval.rankboot[i],sep=""), xlab=xlabel[i])
+    abline(v=F0[i], col='red')
+    text(x=F0[i], y=100, labels=paste("p=",pval.rankboot[i],sep=""))
+}
+```
+
+```{r, eval=F, echo=F}
+par(mfrow=c(1,3))
+for (i in 1:3){
+    qqplot( qf( seq(0,1,length=deals),dof[i], dof[4]), bootF, 
+        main=titlevec[i], 
+        xlab="Theoretical F Quantiles", 
+        ylab="Bootstrap F-like Quantiles")
+abline(0, dof[i]/dof[4], col='red')
+}
+```
+
+# P-value comparison
+Here we compare the p-values that were generated by each method. The bootstrap using the L1-norm (sum of absolute deviations from the mean) looks to be the most powerful. The rank tests have the worst power, and are known to give unreliable results for multifactorial ANOVA.
+```{r, echo=F}
+comparison <- data.frame(LM=round(pval.lm[-4],4),  
+                         #LMboot=pval.lmboot[-4], 
+                         L1=pval.L1, 
+                         L2=pval.L2, 
+                         rank=round(pval.rank[-4],4), 
+                         rankboot=pval.rankboot)
+rownames(comparison) <- c("diet", "time", "interaction")
+colnames(comparison) <- c("built-in ANOVA", "bootstrap with L1-norm", "bootstrap with L2-norm", "rank", "bootstrap rank")
+table <- t(comparison)
+```
+
+```{r kable, echo=F}
+library(knitr)
+kable(table, digits=4)
+```

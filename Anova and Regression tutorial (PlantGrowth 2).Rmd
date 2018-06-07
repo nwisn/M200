@@ -1,0 +1,605 @@
+---
+title: "One-Way Analysis of Variance"
+author: "Nicholas Wisniewski"
+date: "May 3, 2016"
+output:
+  html_document:
+    toc: true
+    theme: spacelab
+    number_sections: true
+---
+```{r, echo=FALSE}
+library(knitr)
+knit_hooks$set(purl = function(before, options) {
+  if (before) return()
+  input  = current_input()  # filename of input document
+  output = paste(tools::file_path_sans_ext(input), 'R', sep = '.')
+  if (knitr:::isFALSE(knitr:::.knitEnv$tangle.start)) {
+    assign('tangle.start', TRUE, knitr:::.knitEnv)
+    unlink(output)
+  }
+  cat(options$code, file = output, sep = '\n', append = TRUE)
+})
+```
+
+# Plant Growth Dataset
+Let's use one of R's built in datasets, PlantGrowth. Here are results from an experiment to compare yields (as measured by dried weight of plants) obtained under a control and two different treatment conditions.
+```{r}
+df <- PlantGrowth
+df$group <- factor(df$group, labels = c("Control", "Treatment 1", "Treatment 2"))
+df
+```
+
+
+```{r, echo=FALSE, eval=T}
+#df.rm <- read.csv("/Users/drwho/Dropbox/Encrypted/M200 Advanced Experimental Statistics/M200.4/repeated measures dataset.csv")
+#df.aov <- read.csv("/Users/drwho/Dropbox/Encrypted/M200 Advanced Experimental Statistics/M200.4/anova dataset.csv")
+```
+
+```{r, eval=T, echo=F}
+#df <- df.aov
+#df
+```
+First, let's display the data.
+```{r, eval=T}
+boxplot(weight ~ group, data=df) 
+stripchart(weight ~ group, add=T, method='jitter', vertical=T, pch=16, col="red", data = df)
+abline(h=mean(df$weight), lty='dotted')  # draw dotted line at the grand mean
+```
+
+We want to test the null hypothesis, which is that the groups were sampled from the same population. To do this, we specifically test the hypothesis that the group means are equal using ANOVA. 
+
+# Standard statistics
+
+## Standard ANOVA
+
+The standard R function for ANOVA is the linear model: lm().
+
+```{r, eval=T}
+model <- lm(weight ~ group, data=df)
+result <- anova(model)
+result
+```
+
+```{r, echo=F}
+p.standard <- result$`Pr(>F)`[1]
+```
+Instead of accepting this p-value, which is based on assumptions about the distribution of the data, we can bootstrap the test. It is easy to grab the F-weight for each resample, as computed by lm():
+
+```{r, eval=T}
+# get the F-statistic from lm()
+F0 = result$`F value`[1]
+
+# Bootstrap the F-statistic to compute the p-value
+deals <- 10000
+bootF <- rep(NA,deals)
+for(i in 1:deals){
+    df$boot <- sample(df$weight, replace=T)
+    bootresult <- anova(lm(boot ~ group, data=df))
+    bootF[i] <- bootresult$`F value`[1]
+}
+pval <- sum(bootF > F0)/deals
+```
+
+Let's look at the resulting F-distribution:
+
+```{r, eval=T}
+hist(bootF, breaks='FD', main="Bootstrapped null distribution")
+abline(v=F0, col='red')
+text(x=F0, y=100, labels=paste("p=",pval,sep=""))
+```
+
+Looking at the QQ plot, we see the theoretical F-distribution.
+
+```{r, eval=T}
+dfB <- result$Df[1]
+dfW <- result$Df[2]
+qqplot( qf( seq(0,1,length=deals), dfB, dfW), bootF, 
+        main="QQ plot for F-distribution", 
+        xlab="Theoretical F Quantiles", 
+        ylab="Bootstrap F-like Quantiles")
+abline(0, 1, col='red')
+```
+
+### Post-hoc tests
+We can easily do post-hoc t-tests using standard R functions.
+
+```{r, eval=T}
+pairwise.t.test(df$weight, df$group, p.adjust="bonferroni")
+```
+
+The result states that there are statistically significant differences between treatment 1 and treatment 2.
+
+### Evaluating assumptions
+
+We could check the homogeneity of variance assumption using a test. If the data is normally distributed, the Bartlett test is the most powerful test to use. However, it is sensitive to data which is not non-normally distribution; it is more likely to return a “false positive” when the data is non-normal. There is also Levene's test, which is more robust to departures from normality than Bartlett's test. And finally, there is the Fligner-Killeen test, which is a non-parametric test that is very robust against departures from normality.
+```{r}
+bartlett.test(weight ~ group, data=df)
+fligner.test(weight ~ group, data=df)
+library(car)
+leveneTest(weight ~ group, data=df)
+```
+
+There's also some plots to look at. The residual plot shows if there is a pattern in the residuals. It should indicate homoscedasticity. The next plot is a QQ plot that looks for normality of the residuals; if they are not normal, the assumptions of ANOVA are potentially violated. A third plot is a scale-location plot, which specifically looks at if the residuals increase with the fitted weights. Finally, the leverage plot gives an idea of which levels of the factor are best fitted.
+```{r}
+par(mfrow=c(2,2))
+plot(model)
+```
+
+
+## Nonparametric tests
+
+We can use the Kruskal-Wallis rank sum test.
+```{r, eval=T}
+kruskal.test(weight~group, data=df)
+```
+
+```{r, echo=F}
+kw <- kruskal.test(weight~group, data=df)
+p.kw <- kw$p.value
+```
+
+### Post-hoc tests
+For post-hoc testing, we can use pairwise Mann-Whitney U tests.
+```{r}
+pairwise.wilcox.test(df$weight, df$group, p.adjust.method="bonferroni", exact=F, correct=F)
+```
+
+
+# Bootstrap statistics
+
+Let's construct a more general bootstrap ANOVA for ourselves. There are two common statistics to do this. The first is to simply look at the sum of squares of the means around the grand mean. The second is to turn this into a ratio statistic like the F-statistic. There are also two ways of doing the resampling, just like in the two-group comparsions: one-box and two-box. 
+
+## One-box bootstrap
+
+First, let's define some preliminary functions to compute the sum of squares, sum of abs, and the test statistics:
+
+```{r, eval=T}
+# Define functions to compute the Sum of Squares, and Sum of Abs
+ssq <- function(x) sum(x^2)
+sab <- function(x) sum(abs(x))
+
+SSstat <- function(Y, group, center=mean, agg=ssq){
+    groupMeans = ave( Y, group, FUN = center)
+    SSB = agg(groupMeans - center(Y))
+    return(SSB)
+}
+
+# A more general function to compute the F-statistic
+Fstat <- function(Y, group, center=mean, agg=ssq) {   
+    groupMeans = ave( Y, group, FUN = center)
+    SSB = agg(groupMeans - center(Y))
+    SSW = agg(Y - groupMeans)
+    return( SSB / SSW)
+}
+```
+
+### ANOVA using L2-norm 
+
+Now let's implement the one-box bootstrap using the mean and sum of squares:
+
+```{r, eval=T}
+# Run it on the dataframe to get the test statistic:
+SS0 <- SSstat(df$weight,df$group, center=mean, agg=ssq)
+F0 <- Fstat(df$weight,df$group, center=mean, agg=ssq)
+
+# Bootstrap the SS-statistic to compute the p-value
+bootSS <- rep(NA,deals)
+for(i in 1:deals){
+    df$boot <- sample(df$weight, replace=T)
+    bootSS[i] <- SSstat(df$boot, df$group, center=mean, agg=ssq)
+}
+pval.SS <- sum(bootSS > SS0)/deals
+
+# Bootstrap the F-statistic to compute the p-value
+bootF <- rep(NA,deals)
+for(i in 1:deals){
+    df$boot <- sample(df$weight, replace=T)
+    bootF[i] <- Fstat(df$boot, df$group, center=mean, agg=ssq)
+}
+pval.F <- sum(bootF > F0)/deals
+```
+
+Take a look at the null distribution for the SS statistic:
+
+```{r, eval=T}
+hist(bootSS, breaks='FD', main="Bootstrapped null distribution")
+abline(v=SS0, col='red')
+text(x=SS0, y=100, labels=paste("p=",pval.SS,sep=""))
+```
+
+
+And take a look at the null distribution for the F statistic:
+
+```{r, eval=T}
+hist(bootF, breaks='FD', main="Bootstrapped null distribution")
+abline(v=F0, col='red')
+text(x=F0, y=100, labels=paste("p=",pval,sep=""))
+```
+
+We can compare the bootstrapped null distribution, in which we ignored counting degrees of freedom, with the theoretical F-distribution with the appropriate degrees of freedom. Notice that the only difference is a scaling (which is indicated by the slope, which is not the identity but some other constant).
+
+```{r, echo=F, eval=F}
+#dfB <- nlevels(df$group) - 1
+#dfW <- nrow(df) - nlevels(df$group)
+```
+
+```{r, eval=T}
+qqplot( qf( seq(0,1,length=deals), dfB, dfW), bootF, 
+        main="QQ plot for F-distribution", 
+        xlab="Theoretical F Quantiles", 
+        ylab="Bootstrap F-like Quantiles")
+abline(0, dfB/dfW, col='red')
+```
+
+
+
+
+
+
+### ANOVA using L1-norm 
+
+Now let's implement the one-box bootstrap using the mean and sum of absolute deviations:
+
+```{r, eval=T}
+# Run it on the dataframe to get the test statistic:
+SS0 <- SSstat(df$weight,df$group, center=mean, agg=sab)
+F0 <- Fstat(df$weight,df$group, center=mean, agg=sab)
+
+# Bootstrap the S-abs statistic to compute the p-value
+bootSS <- rep(NA,deals)
+for(i in 1:deals){
+    df$boot <- sample(df$weight, replace=T)
+    bootSS[i] <- SSstat(df$boot, df$group, center=mean, agg=sab)
+}
+pval.SS <- sum(bootSS > SS0)/deals
+
+# Bootstrap the F-abs statistic to compute the p-value
+bootF <- rep(NA,deals)
+for(i in 1:deals){
+    df$boot <- sample(df$weight, replace=T)
+    bootF[i] <- Fstat(df$boot, df$group, center=mean, agg=sab)
+}
+pval.F <- sum(bootF > F0)/deals
+```
+
+Take a look at the null distribution for the S-abs statistic:
+
+```{r, eval=T}
+hist(bootSS, breaks='FD', main="Bootstrapped null distribution")
+abline(v=SS0, col='red')
+text(x=SS0, y=100, labels=paste("p=",pval.SS,sep=""))
+```
+
+
+Now take a look at the null distribution for the F statistic. We get a very similar p-value:
+
+```{r, eval=T}
+hist(bootF, breaks='FD', main="Bootstrapped null distribution")
+abline(v=F0, col='red')
+text(x=F0, y=100, labels=paste("p=",pval.F,sep=""))
+```
+
+This distribution looks like a chi-squared distribution.
+
+```{r, eval=T}
+qqplot( qchisq( seq(0,1,length=deals), 8), bootF, 
+        main="QQ plot for F-abs distribution", 
+        xlab="Theoretical Chi-Squared Quantiles", 
+        ylab="Bootstrap F-abs Quantiles")
+abline(0,1/dfW, col='red')
+```
+
+
+
+
+### Rank test
+
+Now let's implement the one-box bootstrap using ranks:
+
+```{r, eval=T}
+# Run it on the dataframe to get the test statistic:
+F0 = Fstat(rank(df$weight),df$group, center=mean, agg=ssq)
+
+# Bootstrap the F-statistic to compute the p-value
+bootF <- rep(NA,deals)
+for(i in 1:deals){
+    df$boot <- sample(df$weight, replace=T)
+    bootF[i] <- Fstat(rank(df$boot), df$group, center=mean, agg=ssq)
+}
+pval <- sum(bootF > F0)/deals
+```
+
+Take a look at the null distribution for the F statistic. We get a very similar p-value:
+
+```{r, eval=T}
+hist(bootF, breaks='FD', main="Bootstrapped null distribution")
+abline(v=F0, col='red')
+text(x=F0, y=100, labels=paste("p=",pval,sep=""))
+```
+
+We can compare the bootstrapped null distribution with the theoretical F-distribution with the appropriate degrees of freedom. Notice that the only difference is a scaling (which is indicated by the slope, which is not the identity but some other constant).
+
+```{r, eval=T}
+qqplot( qf( seq(0,1,length=deals), dfB, dfW), bootF, 
+        main="QQ plot for F-distribution", 
+        xlab="Theoretical F Quantiles", 
+        ylab="Bootstrap F-like Quantiles")
+```
+
+
+
+## Many-box bootstrap
+
+### ANOVA using L2-norm 
+
+Now let's implement the many-box bootstrap using the mean and sum of squares:
+
+```{r, eval=T}
+# Run it on the dataframe to get the test statistic:
+SS0 <- SSstat(df$weight,df$group, center=mean, agg=ssq)
+F0 <- Fstat(df$weight,df$group, center=mean, agg=ssq)
+
+# Bootstrap the SS-statistic to compute the p-value
+bootSS <- rep(NA,deals)
+residuals <- df$weight - ave(df$weight, df$group)
+for(i in 1:deals){
+    df$boot <- ave(residuals, df$group, FUN=function(x) sample(x, replace=TRUE))
+    bootSS[i] <- SSstat(df$boot, df$group, center=mean, agg=ssq)
+}
+pval.SS <- sum(bootSS > SS0)/deals
+
+# Bootstrap the F-statistic to compute the p-value
+bootF <- rep(NA,deals)
+residuals <- df$weight - ave(df$weight, df$group)
+for(i in 1:deals){
+    df$boot <- ave(residuals, df$group, FUN=function(x) sample(x, replace=TRUE))
+    bootF[i] <- Fstat(df$boot, df$group, center=mean, agg=ssq)
+}
+pval.F <- sum(bootF > F0)/deals
+```
+
+Take a look at the null distribution for the SS statistic:
+
+```{r, eval=T}
+hist(bootSS, breaks='FD', main="Bootstrapped null distribution")
+abline(v=SS0, col='red')
+text(x=SS0, y=100, labels=paste("p=",pval.SS,sep=""))
+```
+
+
+And take a look at the null distribution for the F statistic:
+
+```{r, eval=T}
+hist(bootF, breaks='FD', main="Bootstrapped null distribution")
+abline(v=F0, col='red')
+text(x=F0, y=100, labels=paste("p=",pval,sep=""))
+```
+
+We can compare the bootstrapped null distribution, in which we ignored counting degrees of freedom, with the theoretical F-distribution with the appropriate degrees of freedom. Notice that the only difference is a scaling (which is indicated by the slope, which is not the identity but some other constant).
+
+```{r, echo=F, eval=F}
+#dfB <- nlevels(df$group) - 1
+#dfW <- nrow(df) - nlevels(df$group)
+```
+
+```{r, eval=T}
+qqplot( qf( seq(0,1,length=deals), dfB, dfW), bootF, 
+        main="QQ plot for F-distribution", 
+        xlab="Theoretical F Quantiles", 
+        ylab="Bootstrap F-like Quantiles")
+abline(0, dfB/dfW, col='red')
+```
+
+
+### ANOVA using L1-norm 
+
+Now let's implement the one-box bootstrap using the mean and sum of absolute deviations:
+
+```{r, eval=T}
+# Run it on the dataframe to get the test statistic:
+SS0 <- SSstat(df$weight,df$group, center=mean, agg=sab)
+F0 <- Fstat(df$weight,df$group, center=mean, agg=sab)
+
+# Bootstrap the S-abs statistic to compute the p-value
+bootSS <- rep(NA,deals)
+for(i in 1:deals){
+    df$boot <- ave(residuals, df$group, FUN=function(x) sample(x, replace=TRUE))
+    bootSS[i] <- SSstat(df$boot, df$group, center=mean, agg=sab)
+}
+pval.SS <- sum(bootSS > SS0)/deals
+
+# Bootstrap the F-abs statistic to compute the p-value
+bootF <- rep(NA,deals)
+for(i in 1:deals){
+    df$boot <- ave(residuals, df$group, FUN=function(x) sample(x, replace=TRUE))
+    bootF[i] <- Fstat(df$boot, df$group, center=mean, agg=sab)
+}
+pval.F <- sum(bootF > F0)/deals
+```
+
+Take a look at the null distribution for the S-abs statistic:
+
+```{r, eval=T}
+hist(bootSS, breaks='FD', main="Bootstrapped null distribution")
+abline(v=SS0, col='red')
+text(x=SS0, y=100, labels=paste("p=",pval.SS,sep=""))
+```
+
+
+Now take a look at the null distribution for the F statistic. We get a very similar p-value:
+
+```{r, eval=T}
+hist(bootF, breaks='FD', main="Bootstrapped null distribution")
+abline(v=F0, col='red')
+text(x=F0, y=100, labels=paste("p=",pval.F,sep=""))
+```
+
+This distribution looks like a chi-squared distribution.
+
+```{r, eval=T}
+qqplot( qchisq( seq(0,1,length=deals), 8), bootF, 
+        main="QQ plot for F-abs distribution", 
+        xlab="Theoretical Chi-Squared Quantiles", 
+        ylab="Bootstrap F-abs Quantiles")
+abline(0,1/dfW, col='red')
+```
+
+
+
+
+
+
+
+# Optimization for R
+
+In the tutorial on Comparing the Means of Two Populations, we learned that for-loops were inefficient, and we could significantly speed up the bootstrap algorithms by vectorizing the code. Here are the vectorized functions.
+
+```{r}
+# faster mean and standard deviation
+mean.fast <- function(x) sum(x) / length(x)
+sd.fast <- function(x){
+    mu <- mean.fast(x)
+    sqrt(sum((x - mu)^2) / (length(x)-1))
+}
+
+# Define functions to compute the Sum of Squares, and Sum of Abs
+ssq <- function(x) sum(x^2)
+sab <- function(x) sum(abs(x))
+
+# A more general function to compute the F-statistic
+Fstat <- function(Y, group, center=mean.fast, agg=ssq) {   
+    groupMeans = ave( Y, group, FUN = center)
+    SSB = agg(groupMeans - center(Y))
+    SSW = agg(Y - groupMeans)
+    return( SSB / SSW)
+}
+
+```
+
+```{r}
+Y <- df$weight
+G <- df$group
+center <- mean.fast
+nboot <- 10000
+```
+
+Each of the bootstrap methods can be done using the following methods
+
+```{r}
+# one-box
+y <- matrix(sample(Y, size = nboot * length(Y), replace = TRUE), nboot, length(Y) )
+Fboot <- apply(y, 1, Fstat, group=G)
+F0 <- Fstat(Y, G)
+p1 <- sum(Fboot >= F0) / nboot
+
+# one-box residuals
+y <- matrix(sample( Y-ave( Y, G, FUN=center), size = nboot * length(Y), replace = TRUE), nboot, length(Y) )  # residuals
+Fboot <- apply(y, 1, Fstat, group=G)
+F0 <- Fstat(Y, G)
+p1r <- sum(Fboot >= F0) / nboot
+
+# one-box ranks
+y <- matrix(sample( Y, size = nboot * length(Y), replace = TRUE), nboot, length(Y) )  # residuals
+y.rank <- t(apply(y, 1, rank))
+Fboot <- apply(y.rank, 1, Fstat, group=G)
+F0 <- Fstat(rank(Y), G)
+p.rank <- sum(Fboot >= F0) / nboot
+
+# many-box residuals
+residuals <- Y-ave( Y, G, FUN=center)
+y <- replicate(nboot, ave(residuals, G, FUN=function(x) sample(x, replace=TRUE)), simplify="array")
+Fboot <- apply(y, 2, Fstat, group=G)
+F0 <- Fstat(Y, G)
+p2r <- sum(Fboot >= F0) / nboot
+
+```
+
+Let's compare all our resulting p-values
+
+
+```{r kable_timings, echo=F}
+# one-box
+y <- matrix(sample(Y, size = nboot * length(Y), replace = TRUE), nboot, length(Y) )
+Fboot <- apply(y, 1, Fstat, group=G, agg=sab)
+F0 <- Fstat(Y, G, agg=sab)
+p1ab <- sum(Fboot >= F0) / nboot
+
+# one-box residuals
+y <- matrix(sample( Y-ave( Y, G, FUN=center), size = nboot * length(Y), replace = TRUE), nboot, length(Y) )  # residuals
+Fboot <- apply(y, 1, Fstat, group=G, agg=sab)
+F0 <- Fstat(Y, G, agg=sab)
+p1rab <- sum(Fboot >= F0) / nboot
+
+# many-box residuals
+residuals <- Y-ave( Y, G, FUN=center)
+y <- replicate(nboot, ave(residuals, G, FUN=function(x) sample(x, replace=TRUE)), simplify="array")
+Fboot <- apply(y, 2, Fstat, group=G, agg=sab)
+F0 <- Fstat(Y, G, agg=sab)
+p2rab <- sum(Fboot >= F0) / nboot
+
+
+
+# one-box
+y <- matrix(sample(Y, size = nboot * length(Y), replace = TRUE), nboot, length(Y) )
+Fboot <- apply(y, 1, Fstat, group=G, center=median, agg=sab)
+F0 <- Fstat(Y, G, center=median, agg=sab)
+p1mab <- sum(Fboot >= F0) / nboot
+
+# one-box residuals
+y <- matrix(sample( Y-ave( Y, G, FUN=center), size = nboot * length(Y), replace = TRUE), nboot, length(Y) )  # residuals
+Fboot <- apply(y, 1, Fstat, group=G, center=median, agg=sab)
+F0 <- Fstat(Y, G, agg=sab, center=median)
+p1rmab <- sum(Fboot >= F0) / nboot
+
+
+# many-box residuals
+residuals <- Y-ave( Y, G, FUN=center)
+y <- replicate(nboot, ave(residuals, G, FUN=function(x) sample(x, replace=TRUE)), simplify="array")
+Fboot <- apply(y, 2, Fstat, group=G, center=median, agg=sab)
+F0 <- Fstat(Y, G, center=median, agg=sab)
+p2rmab <- sum(Fboot >= F0) / nboot
+
+tests <- c(p.standard, p.kw, p1, p1r, p.rank, p2r,
+  p1ab, p1rab, p2rab,
+  p1mab, p1rmab, p2rmab)
+
+names(tests) <- c("Standard ANOVA", "Kruskal-Wallis",  "one-box L2", "one-box residuals L2", "rank", "many-box residuals L2", 
+                  "one-box L1", "one-box residuals L1", "many-box residuals L1",
+                  "one-box, median L1", "one-box residuals, median L1", "many-box residuals, median L1")
+
+ptab <- cbind(tests[c(1,3,4,7,8,10,11,6,9,12,2,5)])
+colnames(ptab) <- "p-value"
+
+library(knitr)
+kable(round(ptab,4))
+```
+
+
+
+
+
+
+```{r, eval=F, echo=F}
+# some test stuff
+F0 <- Fstat(df$weight,df$group, center=mean.fast, agg=ssq)
+
+# Bootstrap the F-statistic to compute the p-value
+bootF <- rep(NA,deals)
+residuals <- df$weight - ave(df$weight, df$group)
+for(i in 1:deals){
+    df$boot <- ave(residuals, df$group, FUN=function(x) sample(x, replace=TRUE))
+    bootF[i] <- Fstat(df$boot, df$group, center=mean, agg=ssq)
+}
+pval.F <- sum(bootF > F0)/deals
+
+
+# many-box residuals
+residuals <- Y-ave( Y, G, FUN=center)
+y <- replicate(nboot, ave(residuals, G, FUN=function(x) sample(x, replace=TRUE)), simplify="array")
+Fboot <- apply(y, 2, Fstat, group=G)
+F0 <- Fstat(Y, G)
+p2r <- sum(Fboot >= F0) / nboot
+
+
+```

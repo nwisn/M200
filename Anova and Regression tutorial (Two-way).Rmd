@@ -1,0 +1,443 @@
+---
+title: "Two-Way Analysis of Variance"
+author: "Nicholas Wisniewski"
+date: "May 3, 2016"
+output:
+  html_document:
+    toc: true
+    theme: spacelab
+    number_sections: true
+---
+```{r, echo=FALSE}
+library(knitr)
+knit_hooks$set(purl = function(before, options) {
+  if (before) return()
+  input  = current_input()  # filename of input document
+  output = paste(tools::file_path_sans_ext(input), 'R', sep = '.')
+  if (knitr:::isFALSE(knitr:::.knitEnv$tangle.start)) {
+    assign('tangle.start', TRUE, knitr:::.knitEnv)
+    unlink(output)
+  }
+  cat(options$code, file = output, sep = '\n', append = TRUE)
+})
+```
+
+# Dataset
+Let's make up some frog data like in Drummond and Vowler's *Analysis of variance: variably complex*. We are interested in seeing if diet has an impact on jumping distance in frogs. Here, 3 different species of frogs were given a diet based on superfoods, and a normal diet. If there is an effect due to the diet, can we tell if is it uniform across species, or if it affects different species differently?
+```{r, echo=T}
+# Initialization
+set.seed(100)
+n <- 15
+sigma <- 100
+
+# Monte Carlo 
+BFnormal <- rnorm(n, mean=600, sd=sigma)
+BFsuper <- rnorm(n, mean=600, sd=sigma)
+LFnormal <- rnorm(n, mean=600, sd=sigma)
+LFsuper <- rnorm(n, mean=650, sd=sigma)
+TFnormal <- rnorm(n, mean=600, sd=sigma)
+TFsuper <- rnorm(n, mean=800, sd=sigma)
+
+# Put together into a dataframe
+df <- data.frame(distance = c(BFnormal, BFsuper, LFnormal, LFsuper, TFnormal, TFsuper),
+                 species = c(rep("Bullfrog", 2*n), rep("Leopardfrog", 2*n), rep("Treefrog", 2*n)),
+                 diet =  rep(c(rep("normal", n), rep("superfood", n)), 3))
+head(df,20)
+```
+
+
+```{r, echo=F, eval=F}
+dev.off()
+par(mar=c(10,3,2,2))
+boxplot(distance ~ species + diet, horizontal=F, las=2, data=df, col=c(rep("red",3),rep("blue",3)))
+stripchart(distance ~ species + diet, data=df, add=T, method='jitter', vertical=T, pch=16, col="grey")
+abline(h=mean(df$distance), lty='dotted')  # draw dotted line at the grand mean
+```
+
+First, let's take a look at the data. If we look according to diet, we see that all species jump the same distance on a normal diet. However, when given superfoods, large differences appear in the mean distances each species can jump. This tells us there's an interaction between species and diet.
+
+```{r, eval=T, echo=F}
+par(mar=c(7,5,2,2))
+par(mfrow=c(1,2))
+boxplot(distance ~ species, horizontal=F, las=2, data=subset(df, df$diet=="normal"), main="normal diet", ylab="distance jumped (cm)")
+stripchart(distance ~ species, data=subset(df, df$diet=="normal"), add=T, method='jitter', vertical=T, pch=16, col="red")
+
+boxplot(distance ~ species, horizontal=F, las=2, data=subset(df, df$diet=="superfood"), main="superfood diet", ylab="distance jumped (cm)")
+stripchart(distance ~ species, data=subset(df, df$diet=="superfood"), add=T, method='jitter', vertical=T, pch=16, col="blue")
+```
+
+
+We want to test the null hypothesis, which is that all the groups were sampled from the same population. To do this, we specifically test the hypothesis that the group means are equal using ANOVA. 
+
+
+# Two-Way ANOVA in R
+
+The standard R function for ANOVA is the linear model: lm().
+
+```{r, eval=T, echo=T}
+model <- lm(distance ~ diet * species, data=df)
+result <- anova(model)
+pval.lm <- result$`Pr(>F)`
+result
+
+```
+
+We see that the interaction is statistically significant. We should therefore be careful about interpreting the main effects (as seen in the boxplots of the marginals); we can tell from the interaction plot below that they only show up due to the interaction term.
+
+Let's look at the interaction plot. We notice that the species look the same while on a normal diet, but the effect of the superfood diet is different across species; there is an interaction.
+```{r, echo=F}
+interaction.plot(df$species, df$diet, df$distance, 
+                 fun = mean,
+                 trace.label = "Diet",
+                 xlab="Frog species", 
+                 ylab="distance jumped",
+                 col=c("red","blue"),
+                 lwd = 3, lty = 1)
+
+```
+
+
+
+Let's look at the marginal distributions, which represent the main effects of species and diet. Notice how the marginals can be misleading. The differences between species only appear with the superfood diet, so it is misleading to say that some species can jump farther in general (left). And the gain distance due to superfood (right) is not experienced by all species; bullfrogs are unaffected by superfood.
+```{r, echo=F}
+par(mar=c(7,5,2,2))
+par(mfrow=c(1,2))
+plot(distance ~ species + diet, data=df, las=2, xlab="",  ylab="distance jumped (cm)")
+```
+
+
+
+```{r, eval=F, echo=F}
+# get the F-statistic from lm()
+F0 = result$`F value`
+
+# Bootstrap the F-statistics to compute the p-values
+deals <- 10000
+bootF <- matrix(NA, nrow=deals, ncol=length(result$`F value`))
+for(i in 1:deals){
+    df$boot <- sample(df$distance, replace=T)
+    bootresult <- anova(lm(boot ~ diet * species, data=df))
+    bootF[i,] <- bootresult$`F value`
+}
+pval.lmboot <- colSums(sweep(bootF, 2, F0,"-") > 0) / deals
+```
+
+
+
+```{r, eval=F, echo=F}
+par(mfrow=c(1,3))
+xlabel <- c("F diet", "F frog-species", "F interaction")
+for(i in 1:3){
+    hist(bootF[,i], breaks='FD', main= paste("Bootstrapped p=",pval.lmboot[i],sep=""), xlab=xlabel[i])
+    abline(v=F0[i], col='red')
+    text(x=F0[i], y=100, labels=paste("p=",pval.lmboot[i],sep=""))
+}
+```
+
+## One-Way ANOVA: Interpreting the interaction
+
+The significant interaction term suggests that we should not trust the main effects from the 2-way ANOVA. If diet affects different species differently, we should look at the effects in each species separately. We can do this by investigating the simple main effects found by using 1-way ANOVA on the subgroups. 
+
+First, we look for differences between diets in each frog species separately.
+
+```{r}
+df.species <- split(df, df$species)
+
+anova(lm(distance ~ diet, data=df.species$Bullfrog)) # Bullfrogs
+anova(lm(distance ~ diet, data=df.species$Leopardfrog)) # Leopardfrogs
+anova(lm(distance ~ diet, data=df.species$Treefrog)) # Treefrogs
+```
+
+```{r, echo=F}
+par(mfrow=c(1,3))
+a1 <- anova(lm(distance ~ diet, data=df.species$Bullfrog)) # Bullfrogs
+a2 <- anova(lm(distance ~ diet, data=df.species$Leopardfrog)) # Leopardfrogs
+a3 <- anova(lm(distance ~ diet, data=df.species$Treefrog)) # Treefrogs
+boxplot(distance ~ diet, data=df.species$Bullfrog,  ylab="distance jumped (cm)", main=c("Bull frogs",paste("p=",round(a1$`Pr(>F)`[1],4))))
+boxplot(distance ~ diet, data=df.species$Leopardfrog, ylab="distance jumped (cm)", main=c("Leopard frogs",paste("p=",round(a2$`Pr(>F)`[1],4))))
+boxplot(distance ~ diet, data=df.species$Treefrog, ylab="distance jumped (cm)", main=c("Tree frogs",paste("p=",signif(a3$`Pr(>F)`[1],2))))
+
+```
+
+
+The diet has a statistically significant effect in treefrogs, but not the others. If there were several different diets, we would be interested in looking next at post-hoc t-tests. But there are only two diets in this experiment, so the 1-way ANOVA's we just did were equivalent to t-tests.
+
+Next, we look for differences between species in each diet group.
+
+```{r}
+df.diet <- split(df, df$diet)
+
+anova(lm(distance ~ species, data=df.diet$normal)) # Normal diet
+anova(lm(distance ~ species, data=df.diet$superfood)) # Super diet
+```
+
+```{r, echo=F}
+a1 <- anova(lm(distance ~ species, data=df.diet$normal)) # Normal diet
+a2 <- anova(lm(distance ~ species, data=df.diet$superfood)) # Super diet
+par(mfrow=c(1,2))
+boxplot(distance ~ species, data=df.diet$normal, ylab="distance jumped (cm)", main=c("Normal food", paste("p=", round(a1$`Pr(>F)`[1],4))))
+boxplot(distance ~ species, data=df.diet$superfood, ylab="distance jumped (cm)", main=c("Superfood", paste("p=", round(a2$`Pr(>F)`[1],4))))
+```
+
+Frogs on the superfood diet have significant differences across frog species. But there is no difference between species on the normal diet.
+
+This leads to the question: what are the differences between frog species in the superfood diet group? We already can tell that treefrogs jump farther than leopardfrogs, who jump faruther than bullfrogs. But to quantify this, we will do pairwise tests between each species. 
+
+
+### Pairwise tests
+
+We do the posthoc tests on the superfood diets:
+```{r}
+pairwise.t.test(df.diet$superfood$distance, df.diet$superfood$species, p.adjust="bonferroni") # Super diet
+```
+
+The result shows that the treefrogs jump statistically significantly further than the rest, while the bullfrog and leopardfrog are not statistically significantly different.
+
+
+## Verifying assumptions
+
+We could check the homogeneity of variance assumption using a test. If the data is normally distributed, the Bartlett test is the most powerful test to use. However, it is sensitive to data which is not non-normally distribution; it is more likely to return a “false positive” when the data is non-normal. There is also Levene's test, which is more robust to departures from normality than Bartlett's test. And finally, there is the Fligner-Killeen test, which is a non-parametric test that is very robust against departures from normality.
+```{r}
+bartlett.test(distance ~ interaction(diet,species), data=df)
+fligner.test(distance ~ interaction(diet,species), data=df)
+library(car)
+leveneTest(distance ~ interaction(diet,species), data=df)
+```
+
+It fails all the tests of homogeneity of variances. But since we set the true variances equal, we know these are false positives. Maybe these tests don't work right in 2-way models.
+
+But there are also some plots to look at. The residual plot shows if there is a pattern in the residuals. It should indicate homoscedasticity. The next plot is a QQ plot that looks for normality of the residuals; if they are not normal, the assumptions of ANOVA are potentially violated. A third plot is a scale-location plot, which specifically looks at if the residuals increase with the fitted weights. Finally, the leverage plot gives an idea of which levels of the factor are best fitted.
+```{r, echo=F}
+par(mfrow=c(2,2))
+plot(model)
+```
+
+
+# Nonparametric tests
+
+No good R package exists. We can transform to ranks. Note that this is not recommended, as Monte Carlo studies by Sawilowsky show problems.
+
+```{r}
+model <- lm(rank(df$distance) ~ diet * species, data=df)
+result <- anova(model)
+pval.rank <- result$`Pr(>F)`
+result
+```
+
+Again, we see an interaction.
+
+## One-Way ANOVA: Interpreting the interaction
+We can do the one-way tests for each subroup. We begin with looking at diet in each species separately.
+```{r, eval=T}
+kruskal.test(distance~diet, data=df.species$Bullfrog) # diet in bullfrogs
+kruskal.test(distance~diet, data=df.species$Leopardfrog) # diet in leopardfrogs
+kruskal.test(distance~diet, data=df.species$Treefrog) # diet in treefrogs
+```
+
+```{r, echo=F}
+par(mfrow=c(1,3))
+a1 <- kruskal.test(distance~diet, data=df.species$Bullfrog) # diet in bullfrogs
+a2 <- kruskal.test(distance~diet, data=df.species$Leopardfrog) # diet in leopardfrogs
+a3 <- kruskal.test(distance~diet, data=df.species$Treefrog) # diet in treefrogs
+boxplot(distance ~ diet, data=df.species$Bullfrog, ylab="distance jumped (cm)", main=c("Bull frogs",paste("p=",round(a1$p.value,4))))
+boxplot(distance ~ diet, data=df.species$Leopardfrog, ylab="distance jumped (cm)", main=c("Leopard frogs",paste("p=",round(a2$p.value,4))))
+boxplot(distance ~ diet, data=df.species$Treefrog, ylab="distance jumped (cm)", main=c("Tree frogs",paste("p=",signif(a3$p.value,2))))
+
+```
+
+We see that there is a statistically significant difference in treefrogs between the mean distance jumped on normal diets and on superfood. This difference does not appear in the other frogs.
+
+Next, we look at differences between species within each diet subgroup.
+```{r}
+kruskal.test(distance~species, data=df.diet$normal) # species differences in normal diet subgroup
+kruskal.test(distance~species, data=df.diet$superfood) # species differences in superfood diet subgroup
+```
+
+```{r, echo=F}
+a1 <- kruskal.test(distance ~ species, data=df.diet$normal) # Normal diet
+a2 <- kruskal.test(distance ~ species, data=df.diet$superfood) # Super diet
+par(mfrow=c(1,2))
+boxplot(distance ~ species, data=df.diet$normal,  ylab="distance jumped (cm)",main=c("Normal food", paste("p=", round(a1$p.value,4))))
+boxplot(distance ~ species, data=df.diet$superfood, ylab="distance jumped (cm)", main=c("Superfood", paste("p=", round(a2$p.value,4))))
+```
+
+We see that there is a statistically significant difference between species in the superfood subgroup. To quantify these differences, we will use nonparametric post-hoc tests.
+
+
+### Pairwise tests
+For post-hoc testing, we can use pairwise Mann-Whitney U tests. We look for differences between species in the superfood group.
+```{r}
+pairwise.wilcox.test(df.diet$superfood$distance, df.diet$superfood$species, p.adjust="bonferroni") # Superfood
+```
+```{r, echo=F}
+par(mfrow=c(1,1))
+boxplot(distance ~ species, data=df.diet$superfood, ylab="distance jumped (cm)", main=c("Superfood"))
+```
+
+We see that treefrogs are different from the rest.
+
+
+# Bootstrap tests
+
+Let's construct a more general bootstrap ANOVA for ourselves. First, let's define some preliminary functions to compute the sum of squares, sum of abs, and the F-like statistic:
+
+```{r, eval=T}
+# Define functions to compute the Sum of Squares, and Sum of Abs
+ssq <- function(x) sum(x^2)
+sab <- function(x) sum(abs(x))
+
+# A more general function to compute the F-statistic
+Fstat.2way <- function( X, f1, f2, center=mean, agg=ssq, rank=FALSE) { 
+    if (rank==FALSE){Y = X} else{Y = rank(-X)}
+    mu = center(Y)  #Grand Mean
+    groupMeans.f1 = ave( Y, f1, FUN=center ) #Pool f1
+    groupMeans.f2 = ave( Y, f2, FUN=center ) #Pool f2
+    groupMeans.int = ave( Y, f1, f2, FUN=center ) #Cell means
+    SSB.f1 = agg(groupMeans.f1 - mu)
+    SSB.f2 = agg(groupMeans.f2 - mu)
+    SSB.int = agg( groupMeans.int - (groupMeans.f1 + groupMeans.f2 - mu) )
+    SSW = agg(Y - groupMeans.int)
+    return( c(f1=SSB.f1 , f2=SSB.f2, int=SSB.int) /  SSW )
+}
+
+```
+
+## F-statistic using L2-norm (sum of squared deviations around the mean)
+
+Now let's implement the bootstrap using the mean and sum of squares:
+
+```{r, eval=T}
+X <- df$distance
+f1 <- df$diet
+f2 <- df$species
+deals <- 10000
+
+F0 <- Fstat.2way(X, f1, f2, center=mean, agg=ssq, rank=F)
+bootF <- matrix(NA, nrow=deals, ncol=3) #preallocate
+for(i in 1:deals){
+    bootX <- sample(X, replace=T)
+    bootF[i,] <- Fstat.2way(bootX, f1, f2, center=mean, agg=ssq, rank=F)
+}
+pval.L2 <- colSums(sweep(bootF, 2, F0,"-") > 0) / deals
+   
+```
+
+Take a look at the null distribution for the F statistic:
+
+```{r, eval=T, echo=F}
+par(mfrow=c(1,3))
+xlabel <- c("F diet", "F frog-species", "F interaction")
+for(i in 1:3){
+    hist(bootF[,i], breaks='FD',  main= paste("Bootstrapped p=",pval.L2[i],sep=""), xlab=xlabel[i])
+    abline(v=F0[i], col='red')
+    text(x=F0[i], y=100, labels=paste("p=",pval.L2[i],sep=""))
+}
+```
+
+We can compare the bootstrapped null distribution, in which we ignored counting degrees of freedom, with the theoretical F-distribution with the appropriate degrees of freedom. Notice that the only difference is a scaling (which is indicated by the slope, which is not the identity but some other constant).
+
+```{r, eval=F, echo=F}
+dof <- result$Df
+titlevec <- c("QQ plot for F diet", "QQ plot for F frog-species", "QQ plot for F interaction")
+par(mfrow=c(1,3))
+for (i in 1:3){
+    qqplot( qf( seq(0,1,length=deals),dof[i], dof[4]), bootF, 
+        main=titlevec[i], 
+        xlab="Theoretical F Quantiles", 
+        ylab="Bootstrap F-like Quantiles")
+abline(0, dof[i]/dof[4], col='red')
+}
+
+```
+
+
+
+
+
+
+## F-statistic using L1-norm (sum of absolute deviations around the mean)
+
+Now let's implement the bootstrap using the mean and sum of absolute deviations:
+
+```{r, eval=T}
+F0 <- Fstat.2way(X, f1, f2, center=mean, agg=sab, rank=F)
+bootF <- matrix(NA, nrow=deals, ncol=3) #preallocate
+for(i in 1:deals){
+    bootX <- sample(X, replace=T)
+    bootF[i,] <- Fstat.2way(bootX, f1, f2, center=mean, agg=sab, rank=F)
+}
+pval.L1 <- colSums(sweep(bootF, 2, F0,"-") > 0) / deals
+```
+
+Take a look at the null distribution for the F statistic. We get a very similar p-value:
+
+```{r, eval=T, echo=F}
+par(mfrow=c(1,3))
+xlabel <- c("F diet", "F frog-species", "F interaction")
+for(i in 1:3){
+    hist(bootF[,i], breaks='FD',  main= paste("Bootstrapped p=",pval.L1[i],sep=""), xlab=xlabel[i])
+    abline(v=F0[i], col='red')
+    text(x=F0[i], y=100, labels=paste("p=",pval.L1[i],sep=""))
+}
+```
+
+
+
+
+
+## Rank test
+
+Now let's implement the bootstrap using ranks:
+
+```{r, eval=T}
+# Run it on the dataframe to get the test statistic:
+F0 <- Fstat.2way(X, f1, f2, center=mean, agg=ssq, rank=T)
+bootF <- matrix(NA, nrow=deals, ncol=3) #preallocate
+for(i in 1:deals){
+    bootX <- sample(X, replace=T)
+    bootF[i,] <- Fstat.2way(bootX, f1, f2, center=mean, agg=ssq, rank=T)
+}
+pval.rankboot <- colSums(sweep(bootF, 2, F0,"-") > 0) / deals
+```
+
+Take a look at the null distribution for the F statistic. We get a very similar p-value:
+
+```{r, eval=T, echo=F}
+par(mfrow=c(1,3))
+xlabel <- c("F diet", "F frog-species", "F interaction")
+for(i in 1:3){
+    hist(bootF[,i], breaks='FD',  main= paste("Bootstrapped p=",pval.rankboot[i],sep=""), xlab=xlabel[i])
+    abline(v=F0[i], col='red')
+    text(x=F0[i], y=100, labels=paste("p=",pval.rankboot[i],sep=""))
+}
+```
+
+```{r, eval=F, echo=F}
+par(mfrow=c(1,3))
+for (i in 1:3){
+    qqplot( qf( seq(0,1,length=deals),dof[i], dof[4]), bootF, 
+        main=titlevec[i], 
+        xlab="Theoretical F Quantiles", 
+        ylab="Bootstrap F-like Quantiles")
+abline(0, dof[i]/dof[4], col='red')
+}
+```
+
+# P-value comparison
+Here we compare the p-values that were generated by each method. The bootstrap using the L1-norm (sum of absolute deviations from the mean) looks to be the most powerful. The rank tests have the worst power, and are known to give unreliable results for multifactorial ANOVA.
+```{r, echo=F}
+comparison <- data.frame(LM=round(pval.lm[-4],4),  
+                         #LMboot=pval.lmboot[-4], 
+                         L1=pval.L1, 
+                         L2=pval.L2, 
+                         rank=round(pval.rank[-4],4), 
+                         rankboot=pval.rankboot)
+rownames(comparison) <- c("diet", "species", "interaction")
+colnames(comparison) <- c("built-in ANOVA", "bootstrap with L1-norm", "bootstrap with L2-norm", "rank", "bootstrap rank")
+table <- t(comparison)
+```
+
+```{r kable, echo=F}
+library(knitr)
+kable(table, digits=4)
+```
