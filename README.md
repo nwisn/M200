@@ -1,5 +1,5 @@
-# M200
-Tutorials for a statistics class originally taught at UCLA 2012-2016.
+# M200 Advanced Experimental Statistics
+Some tutorials for the Biostats/PhySci M200 statistics class originally taught at UCLA 2012-2016.
 
 - [Comparing the means of two groups: t-test](https://nwisn.github.io/M200/t-test_tutorial_2.html)
 - [Statistical power when testing the means of two groups](https://nwisn.github.io/M200/t-test_power_tutorial.html)
